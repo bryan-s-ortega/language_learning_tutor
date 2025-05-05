@@ -1,0 +1,14 @@
+[project]
+name = "english-learning"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "functions-framework>=3.8.2",
+    "google-cloud-firestore>=2.20.2",
+    "google-cloud-secret-manager>=2.23.3",
+    "google-cloud-speech>=2.32.0",
+    "google-generativeai>=0.8.5",
+    "requests>=2.32.3",
+]
