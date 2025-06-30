@@ -53,17 +53,53 @@ def send_telegram_message(bot_token, chat_id, text, reply_markup=None):
         logger.error(f"send_telegram_message called with text=None for chat_id {chat_id}. Sending a default error message.")
         text = "Sorry, an unexpected error occurred, and I don't have a specific message to send."
 
+    # Validate and sanitize text for Telegram
+    if len(text) > 4096:
+        logger.warning(f"Message too long ({len(text)} chars), truncating to 4096 chars")
+        text = text[:4093] + "..."
+    
+    # Escape problematic Markdown characters that might cause 400 errors
+    # Remove or escape characters that can break Markdown parsing
+    text = text.replace('_', r'\_').replace('*', r'\*').replace('[', r'\[').replace(']', r'\]').replace('`', r'\`')
+    
     payload = {'chat_id': chat_id, 'text': text, 'parse_mode': 'Markdown'}
     if reply_markup:
         payload['reply_markup'] = json.dumps(reply_markup)
+    
     try:
         logger.info(f"Sending message to {chat_id}: {text[:50]}...")
+        logger.debug(f"Full payload: {payload}")
         response = requests.post(telegram_api_url, json=payload, timeout=15)
+        
+        if response.status_code == 400:
+            # Log detailed error information for 400 errors
+            logger.error(f"Telegram 400 Bad Request. Response: {response.text}")
+            logger.error(f"Payload that caused error: {payload}")
+            
+            # Try sending without Markdown if parse mode is the issue
+            logger.info("Retrying without Markdown parse mode...")
+            payload_no_markdown = {'chat_id': chat_id, 'text': text}
+            if reply_markup:
+                payload_no_markdown['reply_markup'] = json.dumps(reply_markup)
+            
+            response = requests.post(telegram_api_url, json=payload_no_markdown, timeout=15)
+            if response.status_code == 200:
+                logger.info("Message sent successfully without Markdown")
+                return response.json().get("ok", False)
+            else:
+                logger.error(f"Failed even without Markdown. Status: {response.status_code}, Response: {response.text}")
+        
         response.raise_for_status()
         logger.info(f"Telegram send status: {response.status_code}")
         return response.json().get("ok", False)
     except requests.exceptions.RequestException as e:
         logger.error(f"Error sending Telegram message to {chat_id}: {e}", exc_info=True)
+        try:
+            # Log response content if available
+            if hasattr(e, 'response') and e.response is not None:
+                logger.error(f"Response content: {e.response.text}")
+        except:
+            pass
         return False
 
 # --- Helper: Get/Update Firestore State ---
