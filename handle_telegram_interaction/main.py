@@ -5,7 +5,7 @@ from utils import (
     access_secret_version, send_telegram_message, update_firestore_state, get_firestore_state,
     send_choice_request_message, transcribe_voice, generate_task, evaluate_answer, TASK_TYPES,
     TELEGRAM_TOKEN_SECRET_ID, AUTHORIZED_CHAT_ID_SECRET_ID, GEMINI_API_KEY_SECRET_ID,
-    update_user_proficiency,
+    update_user_proficiency, get_adaptive_task_type, get_user_proficiency, generate_progress_report,
     logger
 )
 
@@ -60,7 +60,7 @@ def handle_telegram_interaction(request):
             if file_id:
                 logger.debug(f"Got file_id {file_id}. Calling transcribe_voice...")
                 try:
-                    transcribed_text = transcribe_voice(bot_token, file_id)
+                    transcribed_text = transcribe_voice(bot_token, file_id, gemini_key)
                 except Exception as E:
                      logger.error(f"ERROR: Exception occurred *during* transcribe_voice call: {E}", exc_info=True)
                      transcribed_text = None
@@ -87,13 +87,23 @@ def handle_telegram_interaction(request):
             update_success = update_firestore_state(reset_state_data, user_doc_id=user_doc_id)
             if update_success:
                 logger.info("State reset successfully for /newtask. Now sending new choice request message.")
-                send_success = send_choice_request_message(bot_token, chat_id)
+                send_success = send_choice_request_message(bot_token, chat_id, user_doc_id)
                 if not send_success:
                      logger.error("Failed to send choice request message after /newtask state reset.")
                      send_telegram_message(bot_token, chat_id, "State reset, but I had trouble sending the new task options. Please try /newtask again later or wait for the daily prompt.")
             else:
                 logger.error("Failed to reset state for /newtask.")
                 send_telegram_message(bot_token, chat_id, "Sorry, there was an issue resetting for a new task. Please try /newtask again.")
+            return "OK", 200
+        
+        elif message_text.lower() == "/progress":
+            logger.info(f"/progress command received from user {user_doc_id}")
+            proficiency_data = get_user_proficiency(user_doc_id)
+            if proficiency_data:
+                progress_message = generate_progress_report(proficiency_data)
+                send_telegram_message(bot_token, chat_id, progress_message)
+            else:
+                send_telegram_message(bot_token, chat_id, "📊 **Learning Progress**: You haven't completed any tasks yet. Start practicing to see your progress!")
             return "OK", 200
 
         current_state = get_firestore_state(user_doc_id=user_doc_id)
@@ -159,7 +169,7 @@ def handle_telegram_interaction(request):
                             logger.error(f"Failed to download voice for analysis: {dl_err}", exc_info=True)
 
                         if audio_bytes_for_eval:
-                            evaluation_result = evaluate_answer(gemini_key, task_details, user_audio_bytes=audio_bytes_for_eval)
+                            evaluation_result = evaluate_answer(gemini_key, task_details, user_audio_bytes=audio_bytes_for_eval, user_doc_id=user_doc_id)
                         else:
                             feedback_text_to_send = "I had trouble downloading your voice message for analysis. Please try sending it again."
                             is_correct_for_proficiency = False
@@ -176,7 +186,7 @@ def handle_telegram_interaction(request):
                     is_correct_for_proficiency = False
                 else:
                     logger.debug(f"Received text answer/follow-up: {user_answer_text_for_eval} for task type {task_type}")
-                    evaluation_result = evaluate_answer(gemini_key, task_details, user_answer_text=user_answer_text_for_eval)
+                    evaluation_result = evaluate_answer(gemini_key, task_details, user_answer_text=user_answer_text_for_eval, user_doc_id=user_doc_id)
             if isinstance(evaluation_result, dict):
                 feedback_text_to_send = evaluation_result.get("feedback_text", feedback_text_to_send)
                 is_correct_for_proficiency = evaluation_result.get("is_correct", False)

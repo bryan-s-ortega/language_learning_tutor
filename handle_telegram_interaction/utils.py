@@ -130,9 +130,22 @@ def update_firestore_state(state_data, user_doc_id=FIRESTORE_SINGLE_USER_DOC_ID)
 
 # --- Helper: Generate Task via Gemini ---
 def generate_task(gemini_key, task_type, user_doc_id, topic=None):
-    prompt_base = f"Generate an English learning task for an advanced learner. Task Type: '{task_type}'. "
-    if topic:
-        prompt_base += f"The general theme for today is '{topic}'. "
+    # Get user proficiency data for adaptive learning
+    proficiency_data = get_user_proficiency(user_doc_id)
+    
+    # Analyze weak areas for this task type
+    weak_items = analyze_user_weaknesses(proficiency_data, task_type)
+    
+    # Get items that need review based on spaced repetition
+    review_items = get_items_for_review(proficiency_data, task_type)
+    
+    # Generate adaptive prompt
+    prompt_base = get_adaptive_task_prompt(task_type, weak_items, topic)
+    
+    # Add review items to prompt if available
+    if review_items and not weak_items:
+        review_areas = [item["name"] for item in review_items[:2]]
+        prompt_base += f"\n\nConsider including review of these areas: {', '.join(review_areas)}."
 
     task_details_dict = {"type": task_type, "specific_item_tested": None, "description": None}
     prompt = ""
@@ -246,7 +259,7 @@ def generate_task(gemini_key, task_type, user_doc_id, topic=None):
         return None
 
 # --- Helper: Evaluate Answer via Gemini ---
-def evaluate_answer(gemini_key, task_details, user_answer_text=None, user_audio_bytes=None, audio_mime_type="audio/ogg"):
+def evaluate_answer(gemini_key, task_details, user_answer_text=None, user_audio_bytes=None, audio_mime_type="audio/ogg", user_doc_id=None):
     logger.info(f"Evaluating answer for task type '{task_details.get('type')}'...")
     task_description = task_details.get('description', 'Task not specified')
     task_type = task_details.get('type', 'Unknown')
@@ -254,11 +267,42 @@ def evaluate_answer(gemini_key, task_details, user_answer_text=None, user_audio_
     genai.configure(api_key=gemini_key)
     model = genai.GenerativeModel(GEMINI_MODEL_NAME)
 
+    # Get user's learning history for personalized feedback
+    learning_context = ""
+    if user_doc_id:
+        proficiency_data = get_user_proficiency(user_doc_id)
+        if proficiency_data:
+            specific_item = task_details.get("specific_item_tested")
+            if specific_item:
+                # Check if this specific item has been practiced before
+                item_type_key = None
+                if task_type == "Error correction":
+                    item_type_key = "grammar_topics"
+                elif task_type == "Vocabulary matching":
+                    item_type_key = "vocabulary_words"
+                elif task_type == "Idiom/Phrasal verb":
+                    item_type_key = "phrasal_verbs"
+                
+                if item_type_key and item_type_key in proficiency_data:
+                    if specific_item in proficiency_data[item_type_key]:
+                        item_stats = proficiency_data[item_type_key][specific_item]
+                        attempts = item_stats.get("attempts", 0)
+                        mastery_level = item_stats.get("mastery_level", 0.0)
+                        
+                        if attempts > 1:
+                            if mastery_level < 0.5:
+                                learning_context = f"\n\nNote: The user has practiced this specific topic ({specific_item}) {attempts} times with {mastery_level*100:.0f}% success rate. They seem to find this challenging, so provide extra encouragement and clear explanations."
+                            elif mastery_level > 0.8:
+                                learning_context = f"\n\nNote: The user has practiced this specific topic ({specific_item}) {attempts} times with {mastery_level*100:.0f}% success rate. They're doing well with this, so you can provide more challenging feedback or advanced tips."
+
     prompt_parts = [
         f"Act as a friendly and supportive English tutor providing feedback.",
         f"The user was given the following task (type: {task_type}):",
         f"--- TASK INSTRUCTION START ---\n{task_description}\n--- TASK INSTRUCTION END ---"
     ]
+    
+    if learning_context:
+        prompt_parts.append(learning_context)
     content_for_gemini = []
     is_correct_assessment_possible = True
 
@@ -338,12 +382,21 @@ def evaluate_answer(gemini_key, task_details, user_answer_text=None, user_audio_
         return {"feedback_text": f"Sorry, an error occurred while generating feedback with the AI model.", "is_correct": False}
 
 # --- Helper: Send Choice Request Message ---
-def send_choice_request_message(bot_token, chat_id):
+def send_choice_request_message(bot_token, chat_id, user_doc_id=None):
     logger.info(f"Attempting to send choice request message to {chat_id}")
     try:
         keyboard_buttons = [[task_type] for task_type in TASK_TYPES]
         reply_markup = {"keyboard": keyboard_buttons, "one_time_keyboard": True, "resize_keyboard": True}
+        
         message_text = "👋 Okay, let's start a new task! What type of English practice would you like?\nChoose one option from the keyboard below:"
+        
+        # Add adaptive learning suggestions if user_doc_id is provided
+        if user_doc_id:
+            proficiency_data = get_user_proficiency(user_doc_id)
+            if proficiency_data:
+                suggested_task_type = get_adaptive_task_type(proficiency_data)
+                message_text += f"\n\n💡 **Adaptive Suggestion**: Based on your learning progress, I recommend trying **{suggested_task_type}** to focus on areas where you can improve most!"
+        
         success = send_telegram_message(bot_token, chat_id, message_text, reply_markup)
         if success:
             logger.info("Choice request message sent successfully.")
@@ -369,6 +422,275 @@ def get_user_proficiency(user_doc_id):
     except Exception as e:
         logger.error(f"Error getting user proficiency for {user_doc_id}: {e}", exc_info=True)
         return {}
+
+# --- Adaptive Learning Helpers ---
+def analyze_user_weaknesses(proficiency_data, task_type):
+    """
+    Analyze user proficiency data to identify weak areas for a specific task type.
+    Returns a list of items that need more practice.
+    """
+    if not proficiency_data:
+        return []
+    
+    weak_items = []
+    item_type_key = None
+    
+    # Map task types to proficiency categories
+    if task_type == "Error correction":
+        item_type_key = "grammar_topics"
+    elif task_type == "Vocabulary matching":
+        item_type_key = "vocabulary_words"
+    elif task_type == "Idiom/Phrasal verb":
+        item_type_key = "phrasal_verbs"
+    
+    if not item_type_key or item_type_key not in proficiency_data:
+        return []
+    
+    items = proficiency_data[item_type_key]
+    
+    # Find items with low mastery level (below 0.7) and sufficient attempts (at least 2)
+    for item_name, stats in items.items():
+        mastery_level = stats.get("mastery_level", 0.0)
+        attempts = stats.get("attempts", 0)
+        
+        if attempts >= 2 and mastery_level < 0.7:
+            weak_items.append({
+                "name": item_name,
+                "mastery_level": mastery_level,
+                "attempts": attempts,
+                "priority_score": (0.7 - mastery_level) * attempts  # Higher priority for more attempts with low mastery
+            })
+    
+    # Sort by priority score (highest first)
+    weak_items.sort(key=lambda x: x["priority_score"], reverse=True)
+    
+    logger.info(f"Found {len(weak_items)} weak items for {task_type}: {[item['name'] for item in weak_items[:3]]}")
+    return weak_items
+
+def get_adaptive_task_prompt(task_type, weak_items, topic=None):
+    """
+    Generate an adaptive prompt based on user's weak areas.
+    """
+    prompt_base = f"Generate an English learning task for an advanced learner. Task Type: '{task_type}'. "
+    
+    if topic:
+        prompt_base += f"The general theme for today is '{topic}'. "
+    
+    if weak_items:
+        weak_areas = [item["name"] for item in weak_items[:3]]  # Focus on top 3 weak areas
+        prompt_base += f"\n\nIMPORTANT: The user has been struggling with these specific areas: {', '.join(weak_areas)}. "
+        prompt_base += "Please focus the task on one or more of these weak areas to help them improve. "
+        prompt_base += "Make the task slightly easier than usual since these are challenging areas for the user."
+    else:
+        prompt_base += "\n\nThe user has been performing well in this area. Please provide a task that challenges them appropriately."
+    
+    return prompt_base
+
+def get_adaptive_task_type(proficiency_data):
+    """
+    Suggest the best task type based on user's overall performance.
+    Returns the task type that needs the most attention.
+    """
+    if not proficiency_data:
+        return random.choice(TASK_TYPES)
+    
+    task_type_scores = {}
+    
+    # Calculate average mastery for each task type
+    for task_type in ["Error correction", "Vocabulary matching", "Idiom/Phrasal verb"]:
+        item_type_key = None
+        if task_type == "Error correction":
+            item_type_key = "grammar_topics"
+        elif task_type == "Vocabulary matching":
+            item_type_key = "vocabulary_words"
+        elif task_type == "Idiom/Phrasal verb":
+            item_type_key = "phrasal_verbs"
+        
+        if item_type_key in proficiency_data and proficiency_data[item_type_key]:
+            items = proficiency_data[item_type_key]
+            total_mastery = 0
+            total_attempts = 0
+            
+            for item_name, stats in items.items():
+                mastery_level = stats.get("mastery_level", 0.0)
+                attempts = stats.get("attempts", 0)
+                total_mastery += mastery_level * attempts
+                total_attempts += attempts
+            
+            if total_attempts > 0:
+                avg_mastery = total_mastery / total_attempts
+                # Lower score = more practice needed
+                task_type_scores[task_type] = avg_mastery
+            else:
+                task_type_scores[task_type] = 0.0  # No practice yet
+        else:
+            task_type_scores[task_type] = 0.0  # No data yet
+    
+    # Find task type with lowest average mastery
+    if task_type_scores:
+        worst_task_type = min(task_type_scores.keys(), key=lambda x: task_type_scores[x])
+        logger.info(f"Adaptive task type selection: {worst_task_type} (avg mastery: {task_type_scores[worst_task_type]:.2f})")
+        return worst_task_type
+    
+    return random.choice(TASK_TYPES)
+
+def should_review_item(item_stats, days_since_last_attempt=7):
+    """
+    Determine if an item should be reviewed based on spaced repetition principles.
+    """
+    if not item_stats or "last_attempt_timestamp" not in item_stats:
+        return True  # Never attempted, should review
+    
+    last_attempt = item_stats["last_attempt_timestamp"]
+    if not last_attempt:
+        return True
+    
+    # Convert Firestore timestamp to datetime
+    from datetime import datetime, timezone
+    if hasattr(last_attempt, 'timestamp'):
+        last_attempt_dt = datetime.fromtimestamp(last_attempt.timestamp(), tz=timezone.utc)
+    else:
+        last_attempt_dt = last_attempt
+    
+    days_elapsed = (datetime.now(timezone.utc) - last_attempt_dt).days
+    
+    mastery_level = item_stats.get("mastery_level", 0.0)
+    
+    # Spaced repetition logic:
+    # - Low mastery (< 0.5): review every 3 days
+    # - Medium mastery (0.5-0.8): review every 7 days  
+    # - High mastery (> 0.8): review every 14 days
+    if mastery_level < 0.5:
+        return days_elapsed >= 3
+    elif mastery_level < 0.8:
+        return days_elapsed >= 7
+    else:
+        return days_elapsed >= 14
+
+def get_items_for_review(proficiency_data, task_type):
+    """
+    Get items that should be reviewed based on spaced repetition.
+    """
+    if not proficiency_data:
+        return []
+    
+    item_type_key = None
+    if task_type == "Error correction":
+        item_type_key = "grammar_topics"
+    elif task_type == "Vocabulary matching":
+        item_type_key = "vocabulary_words"
+    elif task_type == "Idiom/Phrasal verb":
+        item_type_key = "phrasal_verbs"
+    
+    if not item_type_key or item_type_key not in proficiency_data:
+        return []
+    
+    items = proficiency_data[item_type_key]
+    review_items = []
+    
+    for item_name, stats in items.items():
+        if should_review_item(stats):
+            review_items.append({
+                "name": item_name,
+                "mastery_level": stats.get("mastery_level", 0.0),
+                "attempts": stats.get("attempts", 0)
+            })
+    
+    # Sort by mastery level (lowest first for review priority)
+    review_items.sort(key=lambda x: x["mastery_level"])
+    
+    logger.info(f"Found {len(review_items)} items for review in {task_type}")
+    return review_items
+
+def generate_progress_report(proficiency_data):
+    """
+    Generate a user-friendly progress report from proficiency data.
+    """
+    if not proficiency_data:
+        return "📊 **Learning Progress**: No data available yet."
+    
+    report_parts = ["📊 **Your Learning Progress**\n"]
+    
+    # Track overall statistics
+    total_attempts = 0
+    total_correct = 0
+    category_stats = {}
+    
+    for category, items in proficiency_data.items():
+        if not items:
+            continue
+            
+        category_attempts = 0
+        category_correct = 0
+        
+        for item_name, stats in items.items():
+            attempts = stats.get("attempts", 0)
+            correct = stats.get("correct", 0)
+            mastery_level = stats.get("mastery_level", 0.0)
+            
+            category_attempts += attempts
+            category_correct += correct
+            total_attempts += attempts
+            total_correct += correct
+        
+        if category_attempts > 0:
+            category_accuracy = (category_correct / category_attempts) * 100
+            category_stats[category] = {
+                "attempts": category_attempts,
+                "correct": category_correct,
+                "accuracy": category_accuracy
+            }
+    
+    # Overall progress
+    if total_attempts > 0:
+        overall_accuracy = (total_correct / total_attempts) * 100
+        report_parts.append(f"🎯 **Overall Accuracy**: {overall_accuracy:.1f}% ({total_correct}/{total_attempts} correct)")
+        report_parts.append(f"📚 **Total Practice Sessions**: {total_attempts}\n")
+    
+    # Category breakdown
+    if category_stats:
+        report_parts.append("📈 **Progress by Category**:")
+        
+        category_names = {
+            "grammar_topics": "Grammar Topics",
+            "vocabulary_words": "Vocabulary Words", 
+            "phrasal_verbs": "Phrasal Verbs & Idioms"
+        }
+        
+        for category, stats in category_stats.items():
+            category_name = category_names.get(category, category.replace("_", " ").title())
+            emoji = "🔧" if stats["accuracy"] < 60 else "✅" if stats["accuracy"] >= 80 else "📈"
+            report_parts.append(f"{emoji} **{category_name}**: {stats['accuracy']:.1f}% ({stats['correct']}/{stats['attempts']})")
+    
+    # Weak areas
+    weak_areas = []
+    for category, items in proficiency_data.items():
+        for item_name, stats in items.items():
+            if stats.get("attempts", 0) >= 2 and stats.get("mastery_level", 0.0) < 0.6:
+                weak_areas.append(item_name)
+    
+    if weak_areas:
+        report_parts.append(f"\n⚠️ **Areas for Improvement** ({len(weak_areas)} items):")
+        for area in weak_areas[:5]:  # Show top 5 weak areas
+            report_parts.append(f"• {area}")
+        if len(weak_areas) > 5:
+            report_parts.append(f"• ... and {len(weak_areas) - 5} more")
+    
+    # Recommendations
+    report_parts.append(f"\n💡 **Recommendations**:")
+    if total_attempts == 0:
+        report_parts.append("• Start with any task type to begin tracking your progress")
+    elif overall_accuracy < 60:
+        report_parts.append("• Focus on reviewing challenging areas")
+        report_parts.append("• Try more practice sessions to improve accuracy")
+    elif overall_accuracy >= 80:
+        report_parts.append("• Great progress! Try more challenging tasks")
+        report_parts.append("• Consider exploring new vocabulary and grammar concepts")
+    else:
+        report_parts.append("• Good progress! Keep practicing to reach mastery")
+        report_parts.append("• Review areas where you made mistakes")
+    
+    return "\n".join(report_parts)
 
 # --- Helper: Update User Proficiency ---
 @firestore.transactional
@@ -419,8 +741,8 @@ def update_user_proficiency(user_doc_id, item_type_key, item_name, is_correct, t
         logger.error(f"Error updating user proficiency for {user_doc_id}: {e}", exc_info=True)
         return False
 
-# --- Helper: Transcribe Voice ---
-def transcribe_voice(bot_token, file_id):
+# --- Helper: Transcribe Voice using Gemini Multi-Modal ---
+def transcribe_voice(bot_token, file_id, gemini_key=None):
     try:
         get_file_url = f"https://api.telegram.org/bot{bot_token}/getFile?file_id={file_id}"
         res_file_path = requests.get(get_file_url, timeout=10)
@@ -432,35 +754,45 @@ def transcribe_voice(bot_token, file_id):
 
         file_download_url = f"https://api.telegram.org/file/bot{bot_token}/{file_path}"
         logger.info(f"Downloading audio from: {file_download_url}")
-        res_audio = requests.get(file_download_url, timeout=20)
+        res_audio = requests.get(file_download_url, timeout=30)  # Increased timeout for longer audio
         res_audio.raise_for_status()
         audio_content = res_audio.content
         logger.info(f"Audio downloaded, size: {len(audio_content)} bytes")
 
-        config = speech.RecognitionConfig(
-            encoding=speech.RecognitionConfig.AudioEncoding.OGG_OPUS,
-            sample_rate_hertz=48000,
-            language_code="en-US",
-            enable_automatic_punctuation=True
-        )
-        logger.debug(f"Using RecognitionConfig for transcription: {config}")
-        audio = speech.RecognitionAudio(content=audio_content)
-        
-        logger.info("Sending audio to Speech-to-Text API...")
-        response = speech_client.recognize(config=config, audio=audio)
-        logger.debug(f"Full Speech API Response object: {response}")
-
-        transcript = ""
-        if response.results:
-            transcript = response.results[0].alternatives[0].transcript
-            logger.debug(f"Transcription successful: '{transcript}'")
-            return transcript.strip()
+        # Use Gemini multi-modal for audio transcription
+        if gemini_key:
+            genai.configure(api_key=gemini_key)
+            model = genai.GenerativeModel(GEMINI_MODEL_NAME)
+            
+            prompt = """
+            Please transcribe this audio message. Extract the spoken text accurately and return ONLY the transcription.
+            If the audio is unclear or contains background noise, do your best to transcribe what you can hear.
+            Return the transcription as plain text without any additional formatting or commentary.
+            """
+            
+            # Create audio part for Gemini
+            audio_part = {
+                "mime_type": "audio/ogg",
+                "data": audio_content
+            }
+            
+            logger.info("Sending audio to Gemini for transcription...")
+            response = model.generate_content([prompt, audio_part])
+            
+            if response.text:
+                transcript = response.text.strip()
+                logger.info(f"Gemini transcription successful: '{transcript[:100]}...'")
+                return transcript
+            else:
+                logger.warning("Gemini returned empty response for transcription")
+                return None
         else:
-            logger.warning("Speech-to-Text returned no results (response.results is empty).")
+            logger.error("No Gemini API key provided for transcription")
             return None
+            
     except requests.exceptions.RequestException as req_err:
         logger.error(f"Error inside transcribe_voice (Telegram Download): {req_err}", exc_info=True)
         return None
     except Exception as e:
-        logger.error(f"Error inside transcribe_voice (Transcription or Other): {e}", exc_info=True)
+        logger.error(f"Error inside transcribe_voice (Gemini Transcription): {e}", exc_info=True)
         return None
