@@ -67,3 +67,34 @@ This project implements a sophisticated language learning system that:
 - **Python 3.12+**: Primary programming language
 - **Google Cloud CLI**: Deployment and management
 - **UV**: Fast Python package manager
+
+## Multi-User Management
+
+This guide explains how to use the multi-user adaptation of the Language Learning Tutor bot.  
+The multi-user system uses Google Secret Manager to store user lists:
+
+### Retrieve admin chat ID
+```bash
+gcloud secrets versions access latest --secret=telegram-user-id
+```
+
+```bash
+# Create authorized users secret (replace with actual chat IDs)
+echo -n "6131994467" | gcloud secrets versions add authorized-users --data-file=-
+# Create admin users secret (replace with actual chat IDs)
+echo -n "6131994467" | gcloud secrets versions add admin-users --data-file=-
+```
+
+## Admin Commands
+
+### Available Commands
+
+| Command | Description | Admin Only |
+|---------|-------------|------------|
+| `/admin` | Show admin help | Yes |
+| `/adduser <chat_id>` | Add new user | Yes |
+| `/removeuser <chat_id>` | Remove user | Yes |
+| `/listusers` | List all users | Yes |
+| `/stats` | System statistics | Yes |
+| `/help` | Show user help | No |
+| `/progress` | Show learning progress | No |
