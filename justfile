@@ -13,8 +13,8 @@ service-account := "daily-english-words@appspot.gserviceaccount.com"
 # Refresh requirements.txt files using uv
 refresh-requirements:
     echo "Refreshing requirements.txt files using uv..."
-    cd handle_telegram_interaction && uv sync --reinstall && uv pip freeze > requirements.txt
-    cd send_daily_choice_request && uv sync --reinstall && uv pip freeze > requirements.txt
+    cd handle_telegram_interaction && uv sync --reinstall && uv pip compile pyproject.toml > requirements.txt
+    cd send_daily_choice_request && uv sync --reinstall && uv pip compile pyproject.toml > requirements.txt
     echo "Requirements refreshed successfully!"
 
 
