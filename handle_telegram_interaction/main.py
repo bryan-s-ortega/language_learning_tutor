@@ -77,6 +77,52 @@ def handle_telegram_interaction(request):
         user_doc_id = str(chat_id)
         logger.info(f"[{request_id}] Processing message from chat_id: {chat_id}")
 
+        message_text = message.get("text", "").strip()
+        voice = message.get("voice")
+        transcribed_text = None
+
+        # Handle /start command specifically BEFORE auth check
+        if message_text.lower() == "/start":
+            logger.info(f"/start command received from user {user_doc_id}")
+            if is_user_authorized(chat_id):
+                # Authorized user - send welcome message
+                welcome_message = """
+🎓 **Welcome to the Language Learning Tutor!**
+
+I'm your AI-powered English learning assistant. Here's how to get started:
+
+**Available Commands:**
+• `/newtask` - Start a new learning task
+• `/progress` - View your learning progress
+• `/help` - Show this help message
+
+**Task Types Available:**
+• Error correction
+• Vocabulary matching  
+• Idiom/Phrasal verb practice
+• Word fluency exercises
+• Voice recording analysis
+
+Ready to start learning? Send `/newtask` to begin!
+"""
+                send_telegram_message(bot_token, chat_id, welcome_message)
+            else:
+                # Unauthorized user - send one-time access request message
+                access_message = f"""
+🚫 **Access Required**
+
+You're not currently authorized to use this Language Learning Tutor bot.
+
+**To get access:**
+Please contact the administrator and provide your chat ID: `{chat_id}`
+
+Once you're added to the authorized users list, you'll be able to start learning English with personalized AI-powered tasks.
+
+Thank you for your interest!
+"""
+                send_telegram_message(bot_token, chat_id, access_message)
+            return "OK", 200
+
         # Multi-user authentication
         if not is_user_authorized(chat_id):
             logger.warning(
@@ -102,10 +148,6 @@ def handle_telegram_interaction(request):
                 "⏰ **Rate Limit Exceeded**: Please wait a few minutes before making more requests.",
             )
             return "Too Many Requests", 429
-
-        message_text = message.get("text", "").strip()
-        voice = message.get("voice")
-        transcribed_text = None
 
         if voice:
             logger.debug("Entered voice processing block.")
@@ -149,48 +191,6 @@ def handle_telegram_interaction(request):
         logger.debug(
             f"Effective message_text before command/state check: '{message_text}'"
         )
-
-        # Handle /start command specifically
-        if message_text.lower() == "/start":
-            logger.info(f"/start command received from user {user_doc_id}")
-            if is_user_authorized(chat_id):
-                # Authorized user - send welcome message
-                welcome_message = """
-🎓 **Welcome to the Language Learning Tutor!**
-
-I'm your AI-powered English learning assistant. Here's how to get started:
-
-**Available Commands:**
-• `/newtask` - Start a new learning task
-• `/progress` - View your learning progress
-• `/help` - Show this help message
-
-**Task Types Available:**
-• Error correction
-• Vocabulary matching  
-• Idiom/Phrasal verb practice
-• Word fluency exercises
-• Voice recording analysis
-
-Ready to start learning? Send `/newtask` to begin!
-"""
-                send_telegram_message(bot_token, chat_id, welcome_message)
-            else:
-                # Unauthorized user - send one-time access request message
-                access_message = """
-🚫 **Access Required**
-
-You're not currently authorized to use this Language Learning Tutor bot.
-
-**To get access:**
-Please contact the administrator and provide your chat ID: `{chat_id}`
-
-Once you're added to the authorized users list, you'll be able to start learning English with personalized AI-powered tasks.
-
-Thank you for your interest!
-"""
-                send_telegram_message(bot_token, chat_id, access_message)
-            return "OK", 200
 
         if message_text.lower() == "/newtask":
             logger.info(f"/newtask command received from user {user_doc_id}")
