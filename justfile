@@ -10,6 +10,26 @@ region := "us-central1"
 build-service-account := "projects/daily-english-words/serviceAccounts/daily-english-words@appspot.gserviceaccount.com"
 service-account := "daily-english-words@appspot.gserviceaccount.com"
 
+# Development and testing commands
+test:
+    echo "Running tests..."
+    pytest
+
+test-coverage:
+    echo "Running tests with coverage..."
+    pytest --cov=handle_telegram_interaction --cov=send_daily_choice_request --cov-report=term-missing --cov-report=html
+
+lint:
+    echo "Running linting checks..."
+    ruff check .
+
+format:
+    echo "Formatting code..."
+    ruff format .
+
+check-all: lint format test
+    echo "All checks completed successfully!"
+
 # Refresh requirements.txt files using uv
 refresh-requirements:
     echo "Refreshing requirements.txt files using uv..."
@@ -17,6 +37,11 @@ refresh-requirements:
     cd send_daily_choice_request && uv sync --reinstall && uv pip compile pyproject.toml > requirements.txt
     echo "Requirements refreshed successfully!"
 
+# Install development dependencies
+install-dev:
+    echo "Installing development dependencies..."
+    uv sync
+    echo "Development dependencies installed!"
 
 # Deploy handle_telegram_interaction function
 deploy-telegram: refresh-requirements
@@ -49,3 +74,12 @@ urls:
     echo "=============="
     echo "handle_telegram_interaction: https://{{region}}-{{project-id}}.cloudfunctions.net/handle-telegram-interaction"
     echo "send_daily_choice_request: https://{{region}}-{{project-id}}.cloudfunctions.net/send-daily-choice-request"
+
+# Show function logs
+logs-telegram:
+    echo "Showing logs for handle_telegram_interaction..."
+    gcloud functions logs read handle-telegram-interaction --limit=50
+
+logs-daily-choice:
+    echo "Showing logs for send_daily_choice_request..."
+    gcloud functions logs read send-daily-choice-request --limit=50
