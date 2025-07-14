@@ -3,62 +3,113 @@ import random
 import requests
 import logging
 import datetime
+import sys
+import os
+from typing import Optional, Dict, Any, List
+from config import config
 
 from google.cloud import secretmanager
 from google.cloud import firestore
 from google.cloud import speech
 import google.generativeai as genai
 
+# Add the parent directory to the path to import config
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Configure structured logging
+logging.basicConfig(
+    level=getattr(logging, config.logging.level), format=config.logging.format
+)
 logger = logging.getLogger(__name__)
-PROJECT_ID = "daily-english-words"
-TELEGRAM_TOKEN_SECRET_ID = "telegram-bot"
-GEMINI_API_KEY_SECRET_ID = "gemini-api"
 
-# Multi-user configuration
-AUTHORIZED_USERS_SECRET_ID = "authorized-users"
-ADMIN_USERS_SECRET_ID = "admin-users"
+# Initialize clients with error handling
+try:
+    secret_client = secretmanager.SecretManagerServiceClient()
+    db = firestore.Client(project=config.database.project_id)
+    speech_client = speech.SpeechClient()
+except Exception as e:
+    logger.error(f"Failed to initialize Google Cloud clients: {e}")
+    raise
 
-FIRESTORE_COLLECTION = "english_practice_state"
-PROFICIENCY_COLLECTION = "user_proficiency"
 
-GEMINI_MODEL_NAME = "gemini-2.0-flash-001"
+class LanguageLearningError(Exception):
+    """Base exception for language learning application"""
 
-secret_client = secretmanager.SecretManagerServiceClient()
-db = firestore.Client(project=PROJECT_ID)
-speech_client = speech.SpeechClient()
+    pass
 
-TASK_TYPES = [
-    "Error correction",
-    "Vocabulary matching",
-    "Idiom/Phrasal verb",
-    "Word starting with letter",
-    "Voice Recording Analysis",
-]
+
+class SecretAccessError(LanguageLearningError):
+    """Raised when secret access fails"""
+
+    pass
+
+
+class FirestoreError(LanguageLearningError):
+    """Raised when Firestore operations fail"""
+
+    pass
+
+
+class TelegramAPIError(LanguageLearningError):
+    """Raised when Telegram API calls fail"""
+
+    pass
+
+
+class GeminiAPIError(LanguageLearningError):
+    """Raised when Gemini API calls fail"""
+
+    pass
 
 
 # --- Helper: Access Secret ---
-def access_secret_version(secret_id, version_id="latest"):
-    if not PROJECT_ID:
-        logger.critical(
+def access_secret_version(secret_id: str, version_id: str = "latest") -> str:
+    """
+    Access a secret version from Google Secret Manager.
+
+    Args:
+        secret_id: The secret ID to access
+        version_id: The version ID (defaults to "latest")
+
+    Returns:
+        The secret value as a string
+
+    Raises:
+        SecretAccessError: If secret access fails
+    """
+    if not config.database.project_id:
+        error_msg = (
             "GCP_PROJECT environment variable not set or PROJECT_ID constant is empty."
         )
-        raise ValueError(
-            "GCP_PROJECT environment variable not set or PROJECT_ID constant is empty."
-        )
-    name = f"projects/{PROJECT_ID}/secrets/{secret_id}/versions/{version_id}"
+        logger.critical(error_msg)
+        raise SecretAccessError(error_msg)
+
+    name = f"projects/{config.database.project_id}/secrets/{secret_id}/versions/{version_id}"
+
     try:
         response = secret_client.access_secret_version(request={"name": name})
+        logger.debug(f"Successfully accessed secret: {secret_id}")
         return response.payload.data.decode("UTF-8")
     except Exception as e:
-        logger.error(f"Error accessing secret {secret_id}: {e}", exc_info=True)
-        raise
+        error_msg = f"Error accessing secret {secret_id}: {e}"
+        logger.error(error_msg, exc_info=True)
+        raise SecretAccessError(error_msg) from e
 
 
 # --- Multi-User Authentication Helpers ---
-def get_authorized_users():
-    """Get list of authorized user chat IDs"""
+def get_authorized_users() -> List[str]:
+    """
+    Get list of authorized user chat IDs.
+
+    Returns:
+        List of authorized user chat IDs
+
+    Raises:
+        SecretAccessError: If secret access fails
+    """
     try:
-        users_data = access_secret_version(AUTHORIZED_USERS_SECRET_ID)
+        users_data = access_secret_version(config.secrets.authorized_users_secret_id)
+
         # Handle both JSON array format and line-separated format
         if users_data.strip().startswith("["):
             # JSON array format
@@ -68,16 +119,26 @@ def get_authorized_users():
             users = [
                 line.strip() for line in users_data.strip().split("\n") if line.strip()
             ]
+            logger.debug(f"Retrieved {len(users)} authorized users")
             return users
     except Exception as e:
-        logger.error(f"Error getting authorized users: {e}")
+        logger.error(f"Error getting authorized users: {e}", exc_info=True)
         return []
 
 
-def get_admin_users():
-    """Get list of admin user chat IDs"""
+def get_admin_users() -> List[str]:
+    """
+    Get list of admin user chat IDs.
+
+    Returns:
+        List of admin user chat IDs
+
+    Raises:
+        SecretAccessError: If secret access fails
+    """
     try:
-        users_data = access_secret_version(ADMIN_USERS_SECRET_ID)
+        users_data = access_secret_version(config.secrets.admin_users_secret_id)
+
         # Handle both JSON array format and line-separated format
         if users_data.strip().startswith("["):
             # JSON array format
@@ -87,26 +148,63 @@ def get_admin_users():
             users = [
                 line.strip() for line in users_data.strip().split("\n") if line.strip()
             ]
+            logger.debug(f"Retrieved {len(users)} admin users")
             return users
     except Exception as e:
-        logger.error(f"Error getting admin users: {e}")
+        logger.error(f"Error getting admin users: {e}", exc_info=True)
         return []
 
 
-def is_user_authorized(chat_id):
-    """Check if user is authorized"""
-    authorized_users = get_authorized_users()
-    return str(chat_id) in authorized_users
+def is_user_authorized(chat_id: str) -> bool:
+    """
+    Check if user is authorized.
+
+    Args:
+        chat_id: The user's chat ID
+
+    Returns:
+        True if user is authorized, False otherwise
+    """
+    try:
+        authorized_users = get_authorized_users()
+        is_authorized = str(chat_id) in authorized_users
+        logger.debug(f"User {chat_id} authorization check: {is_authorized}")
+        return is_authorized
+    except Exception as e:
+        logger.error(f"Error checking user authorization for {chat_id}: {e}")
+        return False
 
 
-def is_admin_user(chat_id):
-    """Check if user is an admin"""
-    admin_users = get_admin_users()
-    return str(chat_id) in admin_users
+def is_admin_user(chat_id: str) -> bool:
+    """
+    Check if user is an admin.
+
+    Args:
+        chat_id: The user's chat ID
+
+    Returns:
+        True if user is admin, False otherwise
+    """
+    try:
+        admin_users = get_admin_users()
+        is_admin = str(chat_id) in admin_users
+        logger.debug(f"User {chat_id} admin check: {is_admin}")
+        return is_admin
+    except Exception as e:
+        logger.error(f"Error checking admin status for {chat_id}: {e}")
+        return False
 
 
-def add_user_to_whitelist(chat_id):
-    """Add a user to the authorized users list"""
+def add_user_to_whitelist(chat_id: str) -> bool:
+    """
+    Add a user to the authorized users list.
+
+    Args:
+        chat_id: The user's chat ID to add
+
+    Returns:
+        True if successful, False otherwise
+    """
     try:
         current_users = get_authorized_users()
         if str(chat_id) not in current_users:
@@ -115,7 +213,7 @@ def add_user_to_whitelist(chat_id):
             users_text = "\n".join(current_users)
 
             # Update the secret
-            secret_name = f"projects/{PROJECT_ID}/secrets/{AUTHORIZED_USERS_SECRET_ID}"
+            secret_name = f"projects/{config.database.project_id}/secrets/{config.secrets.authorized_users_secret_id}"
             secret_client.add_secret_version(
                 request={
                     "parent": secret_name,
@@ -128,12 +226,20 @@ def add_user_to_whitelist(chat_id):
             logger.info(f"User {chat_id} already authorized")
             return True
     except Exception as e:
-        logger.error(f"Error adding user {chat_id} to whitelist: {e}")
+        logger.error(f"Error adding user {chat_id} to whitelist: {e}", exc_info=True)
         return False
 
 
-def remove_user_from_whitelist(chat_id):
-    """Remove a user from the authorized users list"""
+def remove_user_from_whitelist(chat_id: str) -> bool:
+    """
+    Remove a user from the authorized users list.
+
+    Args:
+        chat_id: The user's chat ID to remove
+
+    Returns:
+        True if successful, False otherwise
+    """
     try:
         current_users = get_authorized_users()
         if str(chat_id) in current_users:
@@ -142,7 +248,7 @@ def remove_user_from_whitelist(chat_id):
             users_text = "\n".join(current_users)
 
             # Update the secret
-            secret_name = f"projects/{PROJECT_ID}/secrets/{AUTHORIZED_USERS_SECRET_ID}"
+            secret_name = f"projects/{config.database.project_id}/secrets/{config.secrets.authorized_users_secret_id}"
             secret_client.add_secret_version(
                 request={
                     "parent": secret_name,
@@ -155,12 +261,19 @@ def remove_user_from_whitelist(chat_id):
             logger.info(f"User {chat_id} not found in authorized users")
             return False
     except Exception as e:
-        logger.error(f"Error removing user {chat_id} from whitelist: {e}")
+        logger.error(
+            f"Error removing user {chat_id} from whitelist: {e}", exc_info=True
+        )
         return False
 
 
-def get_system_statistics():
-    """Get overall system statistics"""
+def get_system_statistics() -> Dict[str, Any]:
+    """
+    Get overall system statistics.
+
+    Returns:
+        Dictionary containing system statistics
+    """
     stats = {
         "total_users": 0,
         "active_users_today": 0,
@@ -198,180 +311,190 @@ def get_system_statistics():
         stats["active_users_today"] = active_users
         stats["total_tasks_completed"] = total_tasks
         stats["average_accuracy"] = (
-            (total_accuracy / stats["total_users"]) if stats["total_users"] > 0 else 0.0
+            (total_accuracy / active_users * 100) if active_users > 0 else 0.0
         )
 
+        logger.info(f"System statistics calculated: {stats}")
+        return stats
     except Exception as e:
-        logger.error(f"Error getting system statistics: {e}")
-
-    return stats
+        logger.error(f"Error calculating system statistics: {e}", exc_info=True)
+        return stats
 
 
 # --- Rate Limiting ---
-def get_user_rate_limit_key(user_id):
-    """Get the Firestore key for user rate limiting"""
+def get_user_rate_limit_key(user_id: str) -> str:
+    """Get the Firestore document key for user rate limiting."""
     return f"rate_limit_{user_id}"
 
 
-def check_rate_limit(user_id, max_requests=10, window_minutes=5):
-    """Check if user has exceeded rate limit"""
-    try:
-        rate_key = get_user_rate_limit_key(user_id)
-        current_time = datetime.datetime.now()
+def check_rate_limit(
+    user_id: str, max_requests: int = 10, window_minutes: int = 5
+) -> bool:
+    """
+    Check if user has exceeded rate limit.
 
-        # Get current rate limit data
-        rate_data = get_firestore_state(user_doc_id=rate_key)
-        if not rate_data:
-            # First request, initialize
-            rate_data = {
-                "requests": [current_time.isoformat()],
-                "window_start": current_time.isoformat(),
-            }
-            update_firestore_state(rate_data, user_doc_id=rate_key)
+    Args:
+        user_id: The user's ID
+        max_requests: Maximum requests allowed in the time window
+        window_minutes: Time window in minutes
+
+    Returns:
+        True if user is within rate limit, False otherwise
+    """
+    try:
+        doc_ref = db.collection("rate_limits").document(
+            get_user_rate_limit_key(user_id)
+        )
+        doc = doc_ref.get()
+
+        now = datetime.datetime.now(datetime.timezone.utc)
+        window_start = now - datetime.timedelta(minutes=window_minutes)
+
+        if not doc.exists:
+            # First request for this user
+            doc_ref.set(
+                {
+                    "requests": [{"timestamp": now.isoformat()}],
+                    "last_updated": now.isoformat(),
+                }
+            )
+            logger.debug(f"Rate limit: First request for user {user_id}")
             return True
 
-        # Parse existing data
-        requests = [
-            datetime.datetime.fromisoformat(req)
-            for req in rate_data.get("requests", [])
-        ]
-        window_start = datetime.datetime.fromisoformat(
-            rate_data.get("window_start", current_time.isoformat())
-        )
+        # Get existing requests
+        data = doc.to_dict()
+        requests_list = data.get("requests", [])
 
-        # Remove old requests outside the window
-        window_end = window_start + datetime.timedelta(minutes=window_minutes)
-        requests = [
-            req for req in requests if req >= window_start and req <= current_time
+        # Filter requests within the time window
+        recent_requests = [
+            req
+            for req in requests_list
+            if datetime.datetime.fromisoformat(req["timestamp"]) > window_start
         ]
 
-        # Check if we need to start a new window
-        if current_time > window_end:
-            window_start = current_time
-            requests = []
-
-        # Check rate limit
-        if len(requests) >= max_requests:
+        if len(recent_requests) >= max_requests:
+            logger.warning(
+                f"Rate limit exceeded for user {user_id}: {len(recent_requests)} requests in {window_minutes} minutes"
+            )
             return False
 
         # Add current request
-        requests.append(current_time)
+        recent_requests.append({"timestamp": now.isoformat()})
 
-        # Update rate limit data
-        new_rate_data = {
-            "requests": [req.isoformat() for req in requests],
-            "window_start": window_start.isoformat(),
-        }
-        update_firestore_state(new_rate_data, user_doc_id=rate_key)
+        # Update Firestore
+        doc_ref.update({"requests": recent_requests, "last_updated": now.isoformat()})
 
+        logger.debug(
+            f"Rate limit: User {user_id} has {len(recent_requests)} requests in current window"
+        )
         return True
 
     except Exception as e:
-        logger.error(f"Error checking rate limit for user {user_id}: {e}")
-        # On error, allow the request (fail open)
+        logger.error(
+            f"Error checking rate limit for user {user_id}: {e}", exc_info=True
+        )
+        # In case of error, allow the request to proceed
         return True
 
 
-# --- Helper: Send Telegram Message ---
-def send_telegram_message(bot_token, chat_id, text, reply_markup=None):
-    telegram_api_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+# --- Telegram API Helpers ---
+def send_telegram_message(
+    bot_token: str, chat_id: str, text: str, reply_markup: Optional[Dict] = None
+) -> bool:
+    """
+    Send a message via Telegram Bot API.
 
-    if text is None:
-        logger.error(
-            f"send_telegram_message called with text=None for chat_id {chat_id}. Sending a default error message."
-        )
-        text = "Sorry, an unexpected error occurred, and I don't have a specific message to send."
+    Args:
+        bot_token: The bot token
+        chat_id: The chat ID to send message to
+        text: The message text
+        reply_markup: Optional reply markup for keyboard
 
-    # Validate and sanitize text for Telegram
-    if len(text) > 4096:
-        logger.warning(
-            f"Message too long ({len(text)} chars), truncating to 4096 chars"
-        )
-        text = text[:4093] + "..."
-
-    # Escape problematic Markdown characters that might cause 400 errors
-    # Remove or escape characters that can break Markdown parsing
-    text = (
-        text.replace("_", r"\_")
-        .replace("*", r"\*")
-        .replace("[", r"\[")
-        .replace("]", r"\]")
-        .replace("`", r"\`")
-    )
-
-    payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
-    if reply_markup:
-        payload["reply_markup"] = json.dumps(reply_markup)
-
+    Returns:
+        True if successful, False otherwise
+    """
     try:
-        logger.info(f"Sending message to {chat_id}: {text[:50]}...")
-        logger.debug(f"Full payload: {payload}")
-        response = requests.post(telegram_api_url, json=payload, timeout=15)
+        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
 
-        if response.status_code == 400:
-            # Log detailed error information for 400 errors
-            logger.error(f"Telegram 400 Bad Request. Response: {response.text}")
-            logger.error(f"Payload that caused error: {payload}")
+        if reply_markup:
+            payload["reply_markup"] = json.dumps(reply_markup)
 
-            # Try sending without Markdown if parse mode is the issue
-            logger.info("Retrying without Markdown parse mode...")
-            payload_no_markdown = {"chat_id": chat_id, "text": text}
-            if reply_markup:
-                payload_no_markdown["reply_markup"] = json.dumps(reply_markup)
-
-            response = requests.post(
-                telegram_api_url, json=payload_no_markdown, timeout=15
-            )
-            if response.status_code == 200:
-                logger.info("Message sent successfully without Markdown")
-                return response.json().get("ok", False)
-            else:
-                logger.error(
-                    f"Failed even without Markdown. Status: {response.status_code}, Response: {response.text}"
-                )
-
+        response = requests.post(url, json=payload, timeout=10)
         response.raise_for_status()
-        logger.info(f"Telegram send status: {response.status_code}")
-        return response.json().get("ok", False)
+
+        result = response.json()
+        if result.get("ok"):
+            logger.debug(f"Telegram message sent successfully to {chat_id}")
+            return True
+        else:
+            logger.error(
+                f"Telegram API error: {result.get('description', 'Unknown error')}"
+            )
+            return False
+
     except requests.exceptions.RequestException as e:
-        logger.error(f"Error sending Telegram message to {chat_id}: {e}", exc_info=True)
-        try:
-            # Log response content if available
-            if hasattr(e, "response") and e.response is not None:
-                logger.error(f"Response content: {e.response.text}")
-        except Exception:
-            pass
+        logger.error(f"Network error sending Telegram message: {e}", exc_info=True)
+        return False
+    except Exception as e:
+        logger.error(f"Error sending Telegram message: {e}", exc_info=True)
         return False
 
 
-# --- Helper: Get/Update Firestore State ---
-def get_firestore_state(user_doc_id):
+# --- Firestore Helpers ---
+def get_firestore_state(user_doc_id: str) -> Dict[str, Any]:
+    """
+    Get user's current state from Firestore.
+
+    Args:
+        user_doc_id: The user's document ID
+
+    Returns:
+        Dictionary containing user state
+    """
     try:
-        doc_ref = db.collection(FIRESTORE_COLLECTION).document(user_doc_id)
-        doc = doc_ref.get()
-        if doc.exists:
-            logger.info(f"Retrieved state for {user_doc_id}")
-            return doc.to_dict()
-        else:
-            logger.info(f"No state found for {user_doc_id}, returning default.")
-            return {"interaction_state": "idle"}
-    except Exception as e:
-        logger.error(
-            f"Error getting Firestore state for {user_doc_id}: {e}", exc_info=True
+        doc_ref = db.collection(config.database.firestore_collection).document(
+            user_doc_id
         )
-        return {"interaction_state": "idle"}
+        doc = doc_ref.get()
 
+        if doc.exists:
+            state_data = doc.to_dict()
+            logger.debug(f"Retrieved state for user {user_doc_id}: {state_data}")
+            return state_data
+        else:
+            logger.debug(f"No existing state found for user {user_doc_id}")
+            return {}
 
-def update_firestore_state(state_data, user_doc_id):
-    try:
-        doc_ref = db.collection(FIRESTORE_COLLECTION).document(user_doc_id)
-        state_data["last_update"] = firestore.SERVER_TIMESTAMP
-        doc_ref.set(state_data, merge=True)
-        logger.info(f"Updated state for {user_doc_id}: {state_data}")
-        return True
     except Exception as e:
         logger.error(
-            f"Error updating Firestore state for {user_doc_id}: {e}", exc_info=True
+            f"Error getting Firestore state for user {user_doc_id}: {e}", exc_info=True
+        )
+        return {}
+
+
+def update_firestore_state(state_data: Dict[str, Any], user_doc_id: str) -> bool:
+    """
+    Update user's state in Firestore.
+
+    Args:
+        state_data: The state data to update
+        user_doc_id: The user's document ID
+
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        doc_ref = db.collection(config.database.firestore_collection).document(
+            user_doc_id
+        )
+        doc_ref.set(state_data, merge=True)
+        logger.debug(f"Updated state for user {user_doc_id}: {state_data}")
+        return True
+
+    except Exception as e:
+        logger.error(
+            f"Error updating Firestore state for user {user_doc_id}: {e}", exc_info=True
         )
         return False
 
@@ -446,7 +569,7 @@ def generate_task(gemini_key, task_type, user_doc_id, topic=None):
             f"Generating voice task instruction with prompt: {instruction_generation_prompt}"
         )
         genai.configure(api_key=gemini_key)
-        model = genai.GenerativeModel(GEMINI_MODEL_NAME)
+        model = genai.GenerativeModel(config.ai.gemini_model_name)
         instruction_response = model.generate_content(instruction_generation_prompt)
         if instruction_response.text:
             task_details_dict["description"] = instruction_response.text.strip()
@@ -477,7 +600,7 @@ def generate_task(gemini_key, task_type, user_doc_id, topic=None):
     )
     try:
         genai.configure(api_key=gemini_key)
-        model = genai.GenerativeModel(GEMINI_MODEL_NAME)
+        model = genai.GenerativeModel(config.ai.gemini_model_name)
         response = model.generate_content(prompt)
 
         if response.text:
@@ -561,7 +684,7 @@ def evaluate_answer(
     task_type = task_details.get("type", "Unknown")
 
     genai.configure(api_key=gemini_key)
-    model = genai.GenerativeModel(GEMINI_MODEL_NAME)
+    model = genai.GenerativeModel(config.ai.gemini_model_name)
 
     # Get user's learning history for personalized feedback
     learning_context = ""
@@ -705,7 +828,7 @@ def evaluate_answer(
 def send_choice_request_message(bot_token, chat_id, user_doc_id):
     logger.info(f"Attempting to send choice request message to {chat_id}")
     try:
-        keyboard_buttons = [[task_type] for task_type in TASK_TYPES]
+        keyboard_buttons = [[task_type] for task_type in config.tasks.task_types]
         reply_markup = {
             "keyboard": keyboard_buttons,
             "one_time_keyboard": True,
@@ -738,7 +861,9 @@ def send_choice_request_message(bot_token, chat_id, user_doc_id):
 # --- Helper: Get User Proficiency ---
 def get_user_proficiency(user_doc_id):
     try:
-        doc_ref = db.collection(PROFICIENCY_COLLECTION).document(user_doc_id)
+        doc_ref = db.collection(config.database.proficiency_collection).document(
+            user_doc_id
+        )
         doc = doc_ref.get()
         if doc.exists:
             logger.info(f"Retrieved proficiency for {user_doc_id}")
@@ -833,7 +958,7 @@ def get_adaptive_task_type(proficiency_data):
     Returns the task type that needs the most attention.
     """
     if not proficiency_data:
-        return random.choice(TASK_TYPES)
+        return random.choice(config.tasks.task_types)
 
     task_type_scores = {}
 
@@ -877,7 +1002,7 @@ def get_adaptive_task_type(proficiency_data):
         )
         return worst_task_type
 
-    return random.choice(TASK_TYPES)
+    return random.choice(config.tasks.task_types)
 
 
 def should_review_item(item_stats, days_since_last_attempt=7):
@@ -1113,7 +1238,9 @@ def update_user_proficiency(
             f"Subjective task {item_name}, not updating mastery, only history/timestamp."
         )
     try:
-        doc_ref = db.collection(PROFICIENCY_COLLECTION).document(user_doc_id)
+        doc_ref = db.collection(config.database.proficiency_collection).document(
+            user_doc_id
+        )
         transaction = db.transaction()
         _update_proficiency_transaction(
             transaction,
@@ -1161,7 +1288,7 @@ def transcribe_voice(bot_token, file_id, gemini_key=None):
         # Use Gemini multi-modal for audio transcription
         if gemini_key:
             genai.configure(api_key=gemini_key)
-            model = genai.GenerativeModel(GEMINI_MODEL_NAME)
+            model = genai.GenerativeModel(config.ai.gemini_model_name)
 
             prompt = """
             Please transcribe this audio message. Extract the spoken text accurately and return ONLY the transcription.

@@ -1,6 +1,13 @@
 import functions_framework
 import requests
 from datetime import datetime
+import sys
+import os
+
+# Add the parent directory to the path to import config
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from config import config
 from utils import (
     access_secret_version,
     send_telegram_message,
@@ -10,9 +17,6 @@ from utils import (
     transcribe_voice,
     generate_task,
     evaluate_answer,
-    TASK_TYPES,
-    TELEGRAM_TOKEN_SECRET_ID,
-    GEMINI_API_KEY_SECRET_ID,
     update_user_proficiency,
     get_user_proficiency,
     generate_progress_report,
@@ -29,8 +33,14 @@ from utils import (
 
 @functions_framework.http
 def handle_telegram_interaction(request):
+    # Generate a unique request ID for tracking
+    import uuid
+
+    request_id = str(uuid.uuid4())[:8]
+    logger.info(f"[{request_id}] Starting webhook processing")
+
     if request.method != "POST":
-        logger.warning("Received non-POST request.")
+        logger.warning(f"[{request_id}] Received non-POST request: {request.method}")
         return "Only POST requests are accepted", 405
 
     bot_token = None
@@ -38,38 +48,48 @@ def handle_telegram_interaction(request):
     chat_id = None
 
     try:
-        bot_token = access_secret_version(TELEGRAM_TOKEN_SECRET_ID)
-        gemini_key = access_secret_version(GEMINI_API_KEY_SECRET_ID)
+        bot_token = access_secret_version(config.secrets.telegram_token_secret_id)
+        gemini_key = access_secret_version(config.secrets.gemini_api_key_secret_id)
         logger.info("Webhook secrets retrieved.")
 
-        logger.debug("Attempting to parse JSON body...")
+        logger.debug(f"[{request_id}] Attempting to parse JSON body...")
         req_body = request.get_json(silent=True)
-        logger.debug(f"JSON body parsed. Type: {type(req_body)}")
+        logger.debug(f"[{request_id}] JSON body parsed. Type: {type(req_body)}")
         if not req_body:
-            logger.error("Error: Invalid or empty JSON body received.")
+            logger.error(f"[{request_id}] Error: Invalid or empty JSON body received.")
             return "Bad Request", 400
 
         message = req_body.get("message")
         if not message:
-            logger.info("No 'message' key found in webhook body. Acknowledging.")
+            logger.info(
+                f"[{request_id}] No 'message' key found in webhook body. Acknowledging."
+            )
             return "OK", 200
 
         chat_id_from_message = message.get("chat", {}).get("id")
         if not chat_id_from_message:
-            logger.warning("No chat_id found in message. Acknowledging.")
+            logger.warning(
+                f"[{request_id}] No chat_id found in message. Acknowledging."
+            )
             return "OK", 200
 
         chat_id = chat_id_from_message
         user_doc_id = str(chat_id)
+        logger.info(f"[{request_id}] Processing message from chat_id: {chat_id}")
 
         # Multi-user authentication
         if not is_user_authorized(chat_id):
-            logger.warning(f"Unauthorized attempt from chat_id: {chat_id}")
+            logger.warning(
+                f"[{request_id}] Unauthorized attempt from chat_id: {chat_id}"
+            )
             send_telegram_message(
                 bot_token,
                 chat_id,
                 "🚫 **Access Denied**: You are not authorized to use this bot. "
                 "Please contact the administrator to get access.",
+            )
+            logger.info(
+                f"[{request_id}] Sent access denied message to unauthorized user {chat_id}"
             )
             return "Forbidden", 403
 
@@ -130,6 +150,48 @@ def handle_telegram_interaction(request):
             f"Effective message_text before command/state check: '{message_text}'"
         )
 
+        # Handle /start command specifically
+        if message_text.lower() == "/start":
+            logger.info(f"/start command received from user {user_doc_id}")
+            if is_user_authorized(chat_id):
+                # Authorized user - send welcome message
+                welcome_message = """
+🎓 **Welcome to the Language Learning Tutor!**
+
+I'm your AI-powered English learning assistant. Here's how to get started:
+
+**Available Commands:**
+• `/newtask` - Start a new learning task
+• `/progress` - View your learning progress
+• `/help` - Show this help message
+
+**Task Types Available:**
+• Error correction
+• Vocabulary matching  
+• Idiom/Phrasal verb practice
+• Word fluency exercises
+• Voice recording analysis
+
+Ready to start learning? Send `/newtask` to begin!
+"""
+                send_telegram_message(bot_token, chat_id, welcome_message)
+            else:
+                # Unauthorized user - send one-time access request message
+                access_message = """
+🚫 **Access Required**
+
+You're not currently authorized to use this Language Learning Tutor bot.
+
+**To get access:**
+Please contact the administrator and provide your chat ID: `{chat_id}`
+
+Once you're added to the authorized users list, you'll be able to start learning English with personalized AI-powered tasks.
+
+Thank you for your interest!
+"""
+                send_telegram_message(bot_token, chat_id, access_message)
+            return "OK", 200
+
         if message_text.lower() == "/newtask":
             logger.info(f"/newtask command received from user {user_doc_id}")
             reset_state_data = {
@@ -163,6 +225,36 @@ def handle_telegram_interaction(request):
                     chat_id,
                     "Sorry, there was an issue resetting for a new task. Please try /newtask again.",
                 )
+            return "OK", 200
+
+        elif message_text.lower() == "/help":
+            logger.info(f"/help command received from user {user_doc_id}")
+            help_message = """
+🎓 **Language Learning Tutor - Help**
+
+**Available Commands:**
+• `/start` - Welcome message and bot introduction
+• `/newtask` - Start a new learning task
+• `/progress` - View your learning progress
+• `/help` - Show this help message
+
+**Task Types:**
+• **Error correction** - Fix grammatical errors in sentences
+• **Vocabulary matching** - Match words with their definitions
+• **Idiom/Phrasal verb** - Learn and practice idioms and phrasal verbs
+• **Word fluency** - Generate words starting with specific letters
+• **Voice recording** - Practice pronunciation with voice analysis
+
+**How it works:**
+1. Send `/newtask` to start
+2. Choose a task type from the keyboard
+3. Complete the task (text or voice)
+4. Receive personalized feedback
+5. Track your progress with `/progress`
+
+Happy learning! 🚀
+"""
+            send_telegram_message(bot_token, chat_id, help_message)
             return "OK", 200
 
         elif message_text.lower() == "/progress":
@@ -259,7 +351,7 @@ def handle_telegram_interaction(request):
 
         if interaction_state == "awaiting_choice":
             chosen_task_type = message_text
-            if chosen_task_type in TASK_TYPES:
+            if chosen_task_type in config.tasks.task_types:
                 logger.info(f"User chose task type: {chosen_task_type}")
                 task_details = generate_task(gemini_key, chosen_task_type, user_doc_id)
                 if task_details and task_details.get("description"):

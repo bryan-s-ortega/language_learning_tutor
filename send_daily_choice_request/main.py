@@ -1,9 +1,15 @@
 import functions_framework
+import sys
+import os
+
+# Add the parent directory to the path to import config
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from config import config
 from utils import (
     access_secret_version,
     update_firestore_state,
     send_choice_request_message,
-    TELEGRAM_TOKEN_SECRET_ID,
     get_authorized_users,
 )
 
@@ -19,7 +25,7 @@ def send_daily_choice_request(request):
     auth_chat_id = None
     try:
         # --- Retrieve Secrets ---
-        bot_token = access_secret_version(TELEGRAM_TOKEN_SECRET_ID)
+        bot_token = access_secret_version(config.secrets.telegram_token_secret_id)
         print("Secrets retrieved for daily choice request.")
 
         # --- Get all authorized users ---

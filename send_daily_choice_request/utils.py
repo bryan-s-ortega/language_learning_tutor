@@ -1,30 +1,27 @@
 import json
 import requests
 import logging
+import sys
+import os
 
 from google.cloud import secretmanager
 from google.cloud import firestore
 
+# Add the parent directory to the path to import config
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from config import config
+
 logger = logging.getLogger(__name__)
-
-# --- Configuration ---
-PROJECT_ID = "daily-english-words"
-TELEGRAM_TOKEN_SECRET_ID = "telegram-bot"
-
-# Multi-user configuration
-AUTHORIZED_USERS_SECRET_ID = "authorized-users"
-ADMIN_USERS_SECRET_ID = "admin-users"
-
-FIRESTORE_COLLECTION = "english_practice_state"
 
 # --- Initialize Clients ---
 secret_client = secretmanager.SecretManagerServiceClient()
-db = firestore.Client(project=PROJECT_ID)
+db = firestore.Client(project=config.database.project_id)
 
 
 # --- Helper: Access Secret ---
 def access_secret_version(secret_id, version_id="latest"):
-    if not PROJECT_ID:
+    if not config.database.project_id:
         # This is a configuration error, best to raise it.
         logger.critical(
             "GCP_PROJECT environment variable not set or PROJECT_ID constant is empty."
@@ -32,7 +29,7 @@ def access_secret_version(secret_id, version_id="latest"):
         raise ValueError(
             "GCP_PROJECT environment variable not set or PROJECT_ID constant is empty."
         )
-    name = f"projects/{PROJECT_ID}/secrets/{secret_id}/versions/{version_id}"
+    name = f"projects/{config.database.project_id}/secrets/{secret_id}/versions/{version_id}"
     try:
         response = secret_client.access_secret_version(request={"name": name})
         return response.payload.data.decode("UTF-8")
@@ -47,7 +44,7 @@ def access_secret_version(secret_id, version_id="latest"):
 def get_authorized_users():
     """Get list of authorized user chat IDs"""
     try:
-        users_data = access_secret_version(AUTHORIZED_USERS_SECRET_ID)
+        users_data = access_secret_version(config.secrets.authorized_users_secret_id)
         # Handle both JSON array format and line-separated format
         if users_data.strip().startswith("["):
             # JSON array format
@@ -66,7 +63,7 @@ def get_authorized_users():
 def get_admin_users():
     """Get list of admin user chat IDs"""
     try:
-        users_data = access_secret_version(ADMIN_USERS_SECRET_ID)
+        users_data = access_secret_version(config.secrets.admin_users_secret_id)
         # Handle both JSON array format and line-separated format
         if users_data.strip().startswith("["):
             # JSON array format
@@ -108,7 +105,9 @@ def send_telegram_message(bot_token, chat_id, text, reply_markup=None):
 
 def update_firestore_state(state_data, user_doc_id):
     try:
-        doc_ref = db.collection(FIRESTORE_COLLECTION).document(user_doc_id)
+        doc_ref = db.collection(config.database.firestore_collection).document(
+            user_doc_id
+        )
         state_data["last_update"] = firestore.SERVER_TIMESTAMP
         doc_ref.set(state_data, merge=True)
         logger.info(f"Updated state for {user_doc_id}: {state_data}")
@@ -120,21 +119,11 @@ def update_firestore_state(state_data, user_doc_id):
         return False
 
 
-# --- Task Types Definition ---
-TASK_TYPES = [
-    "Error correction",
-    "Vocabulary matching",
-    "Idiom/Phrasal verb",
-    "Word starting with letter",
-    "Voice Recording Analysis",
-]
-
-
 # --- Helper: Send Choice Request Message ---
 def send_choice_request_message(bot_token, chat_id, user_doc_id):
     logger.info(f"Attempting to send choice request message to {chat_id}")
     try:
-        keyboard_buttons = [[task_type] for task_type in TASK_TYPES]
+        keyboard_buttons = [[task_type] for task_type in config.tasks.task_types]
         reply_markup = {
             "keyboard": keyboard_buttons,
             "one_time_keyboard": True,
