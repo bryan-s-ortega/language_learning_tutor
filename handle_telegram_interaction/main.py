@@ -77,6 +77,22 @@ def handle_telegram_interaction(request):
         user_doc_id = str(chat_id)
         logger.info(f"[{request_id}] Processing message from chat_id: {chat_id}")
 
+        # Fetch user state early to check for blocked state
+        current_state = get_firestore_state(user_doc_id=user_doc_id)
+        interaction_state = current_state.get("interaction_state", "idle")
+        # Blocked state check
+        if interaction_state == "blocked_due_to_error":
+            if message.get("text", "").strip().lower() in ["/start", "/newtask"]:
+                # Allow reset
+                pass
+            else:
+                send_telegram_message(
+                    bot_token,
+                    chat_id,
+                    "⚠️ The bot is temporarily unavailable due to a system error or quota issue. Please use /start or /newtask to reset.",
+                )
+                return "OK", 200
+
         message_text = message.get("text", "").strip()
         voice = message.get("voice")
         transcribed_text = None
@@ -601,12 +617,16 @@ Happy learning! 🚀
 
     except Exception as e:
         logger.error(f"FATAL Error processing webhook request: {e}", exc_info=True)
-        if bot_token and chat_id:
+        if bot_token and chat_id and user_doc_id:
             try:
+                update_firestore_state(
+                    {"interaction_state": "blocked_due_to_error"},
+                    user_doc_id=user_doc_id,
+                )
                 send_telegram_message(
                     bot_token,
                     chat_id,
-                    f"Debug: A critical error occurred in the webhook: {str(e)[:100]}",
+                    f"Debug: A critical error occurred in the webhook: {str(e)[:100]}\nThe bot is now paused. Please use /start or /newtask to reset.",
                 )
             except Exception:
                 pass
