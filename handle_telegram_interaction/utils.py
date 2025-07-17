@@ -12,6 +12,7 @@ from google.cloud import secretmanager
 from google.cloud import firestore
 from google.cloud import speech
 import google.generativeai as genai
+import re
 
 # Add the parent directory to the path to import config
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -531,16 +532,20 @@ def generate_task(gemini_key, task_type, user_doc_id, topic=None):
     }
     prompt = ""
 
+    instruction_prefix = "Present the following task for the user to answer. Do NOT answer or solve the task yourself. Do NOT justify or explain your instructions. "
+
     if task_type == "Error correction":
         prompt = prompt_base + (
-            "Focus on a common English grammatical error (e.g., subject-verb agreement, tense misuse, articles, prepositions). "
+            instruction_prefix
+            + "Focus on a common English grammatical error (e.g., subject-verb agreement, tense misuse, articles, prepositions). "
             "On a NEW line, identify the specific grammar concept being tested, like 'ITEM: [grammar concept name]'. "
             "Then, on a NEW line, provide a single sentence containing this error for the user to correct. "
             "Example for ITEM: Past Simple Irregular Verb\nSentence: He goed to the park."
         )
     elif task_type == "Vocabulary matching":
         prompt = prompt_base + (
-            f"Provide 3 related English vocabulary words suitable for a {difficulty_level} learner. "
+            instruction_prefix
+            + f"Provide 3 related English vocabulary words suitable for a {difficulty_level} learner. "
             "For each word, on a NEW line, identify it like 'ITEM: [word]'. "
             "After listing all ITEMs, provide their definitions. "
             "The definitions should be presented in a jumbled or randomized order. "
@@ -548,45 +553,79 @@ def generate_task(gemini_key, task_type, user_doc_id, topic=None):
         )
     elif task_type == "Idiom":
         prompt = prompt_base + (
-            "Choose one common English idiom. "
+            instruction_prefix + "Choose one common English idiom. "
             "On a NEW line, identify it clearly, like 'ITEM: [idiom]'. "
             "Then, on subsequent lines, explain its meaning and provide one clear example sentence. "
             "Finally, ask the user to write their own sentence using it."
         )
     elif task_type == "Phrasal verb":
         prompt = prompt_base + (
-            "Choose one common English phrasal verb. "
+            instruction_prefix + "Choose one common English phrasal verb. "
             "On a NEW line, identify it clearly, like 'ITEM: [phrasal verb]'. "
             "Then, on subsequent lines, explain its meaning and provide one clear example sentence. "
             "Finally, ask the user to write their own sentence using it."
         )
     elif task_type == "Vocabulary (5 advanced words)":
         prompt = prompt_base + (
-            f"Provide 5 English words suitable for a {difficulty_level} learner. "
+            instruction_prefix
+            + f"Provide 5 English words suitable for a {difficulty_level} learner. "
             "For each word, on a NEW line, identify it like 'ITEM: [word]'. "
             "After listing all ITEMs, provide their definitions. "
             "Make it clear the user should try to use each word in a sentence."
         )
     elif task_type == "Writing (thoughtful question)":
         prompt = prompt_base + (
-            "Ask the user a thoughtful, open-ended question that encourages them to write an extensive answer (at least 5 sentences). "
+            instruction_prefix
+            + "Ask the user a thoughtful, open-ended question that encourages them to write an extensive answer (at least 5 sentences). "
             "The question should be relevant to daily life, culture, or personal growth. "
             "Make it clear that the user should write as much as possible."
         )
     elif task_type == "Listening (YouTube scene)":
         prompt = prompt_base + (
-            f"Share a short scene from a movie or TV series on YouTube (provide the link) suitable for a {difficulty_level} English learner. "
-            "Ask the user to watch the scene and then answer a comprehension question about it. "
-            "The question should check their understanding of the main idea or details, and be appropriate for the chosen English learner difficulty."
+            instruction_prefix
+            + f"Suggest a search query for a specific scene from a TV show or movie on YouTube, suitable for a {difficulty_level} English learner. "
+            "The query should be for a particular scene (e.g., 'Friends Ross leather pants scene', 'Harry Potter first flying lesson scene'). Do NOT provide a link, just the search query."
         )
+        genai.configure(api_key=gemini_key)
+        model = genai.GenerativeModel(config.ai.gemini_model_name)
+        response = model.generate_content(prompt)
+        if response.text:
+            search_query = response.text.strip().split("\n")[0]
+            # 2. Use YouTube API
+            from utils import access_secret_version
+
+            youtube_api_key = access_secret_version("youtube")
+            video_url = youtube_search(search_query, youtube_api_key)
+            if not video_url:
+                logger.warning(
+                    f"YouTube API did not return a valid video for query: {search_query}"
+                )
+                task_details_dict["description"] = (
+                    "Sorry, I couldn't find a suitable YouTube video for this task. Please try again."
+                )
+                return task_details_dict
+            # 3. Insert into description
+            task_details_dict["description"] = (
+                f"Watch this YouTube video: {video_url}\n\nAfter watching, answer the following question: (Describe the main idea or answer a comprehension question about the scene.)"
+            )
+            return task_details_dict
+        else:
+            logger.warning("Gemini did not return a search query for YouTube.")
+            task_details_dict["description"] = (
+                "Sorry, I couldn't generate a search query for this task. Please try again."
+            )
+            return task_details_dict
     elif task_type == "Describing (image or video)":
         prompt = prompt_base + (
-            f"Share an image or a YouTube video link suitable for a {difficulty_level} English learner. "
-            "Ask the user to provide a comprehensive description of what they see. "
-            "Encourage the user to use as much detail as possible in their description, and tailor the expected detail to the chosen English learner difficulty."
+            instruction_prefix
+            + f"Generate a random, unique image suitable for a {difficulty_level} English learner. Do NOT describe the image yourself. Only ask the user to describe the generated image in as much detail as possible, in their own words."
         )
     elif task_type == "Word starting with letter":
         letter = random.choice("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+        prompt = prompt_base + (
+            instruction_prefix
+            + "This is a fluency task. List as many English words as you can starting with the letter '{letter}' in one minute."
+        )
         task_details_dict["description"] = (
             f"This is a fluency task. List as many English words as you can starting with the letter '{letter}' in one minute."
         )
@@ -595,18 +634,14 @@ def generate_task(gemini_key, task_type, user_doc_id, topic=None):
         return task_details_dict
 
     elif task_type == "Voice Recording Analysis":
-        instruction_generation_prompt = (
-            prompt_base
-            + "Ask the user to record a voice message of any length. "
-            + "The instruction should be to talk about any topic. "
-            + "Output only the instruction for the user."
+        prompt = prompt_base + (
+            instruction_prefix
+            + "Ask the user to record a voice message of any length. The instruction should be to talk about any topic. Output only the instruction for the user."
         )
-        logger.info(
-            f"Generating voice task instruction with prompt: {instruction_generation_prompt}"
-        )
+        logger.info(f"Generating voice task instruction with prompt: {prompt}")
         genai.configure(api_key=gemini_key)
         model = genai.GenerativeModel(config.ai.gemini_model_name)
-        instruction_response = model.generate_content(instruction_generation_prompt)
+        instruction_response = model.generate_content(prompt)
         if instruction_response.text:
             task_details_dict["description"] = instruction_response.text.strip()
             logger.info(
@@ -634,76 +669,122 @@ def generate_task(gemini_key, task_type, user_doc_id, topic=None):
     logger.info(
         f"Generating task for type '{task_type}' with prompt: {prompt[:100]}..."
     )
-    try:
-        genai.configure(api_key=gemini_key)
-        model = genai.GenerativeModel(config.ai.gemini_model_name)
-        response = model.generate_content(prompt)
+    max_retries = 2
+    for attempt in range(max_retries + 1):
+        try:
+            genai.configure(api_key=gemini_key)
+            model = genai.GenerativeModel(config.ai.gemini_model_name)
+            response = model.generate_content(prompt)
 
-        if response.text:
-            raw_gemini_response_text = response.text.strip()
-            logger.info(
-                f"Generated task content (raw): {raw_gemini_response_text[:300]}..."
-            )
+            if response.text:
+                raw_gemini_response_text = response.text.strip()
+                logger.info(
+                    f"Generated task content (raw): {raw_gemini_response_text[:300]}..."
+                )
 
-            lines = raw_gemini_response_text.split("\n")
-            items_found = []
-            other_lines_for_description = []
+                lines = raw_gemini_response_text.split("\n")
+                items_found = []
+                other_lines_for_description = []
 
-            for line in lines:
-                if line.upper().startswith("ITEM:"):
-                    items_found.append(line[len("ITEM:") :].strip())
+                for line in lines:
+                    if line.upper().startswith("ITEM:"):
+                        items_found.append(line[len("ITEM:") :].strip())
+                    else:
+                        other_lines_for_description.append(line)
+                if task_type == "Vocabulary matching":
+                    if items_found:
+                        user_description = "Match the following words with their definitions:\n\n**Words to match:**\n"
+                        for i, word in enumerate(items_found):
+                            user_description += f"{i + 1}. {word}\n"
+                        user_description += "\n**Definitions:**\n"
+                        user_description += "\n".join(
+                            other_lines_for_description
+                        ).strip()
+                        task_details_dict["description"] = user_description
+                        task_details_dict["specific_item_tested"] = items_found
+                    else:
+                        logger.warning(
+                            "Vocabulary matching: 'ITEM:' tags not found or parsed incorrectly. Using full response as description."
+                        )
+                        task_details_dict["description"] = raw_gemini_response_text
+                        task_details_dict["specific_item_tested"] = [
+                            letter[len("ITEM:") :].strip()
+                            for letter in raw_gemini_response_text.split("\n")
+                            if letter.upper().startswith("ITEM:")
+                        ]
+
                 else:
-                    other_lines_for_description.append(line)
-            if task_type == "Vocabulary matching":
-                if items_found:
-                    user_description = "Match the following words with their definitions:\n\n**Words to match:**\n"
-                    for i, word in enumerate(items_found):
-                        user_description += f"{i + 1}. {word}\n"
-                    user_description += "\n**Definitions:**\n"
-                    user_description += "\n".join(other_lines_for_description).strip()
-                    task_details_dict["description"] = user_description
-                    task_details_dict["specific_item_tested"] = items_found
-                else:
+                    task_details_dict["description"] = "\n".join(
+                        other_lines_for_description
+                    ).strip()
+                    if items_found:
+                        task_details_dict["specific_item_tested"] = items_found[0]
+
+                if (
+                    not task_details_dict.get("description")
+                    and raw_gemini_response_text
+                ):
                     logger.warning(
-                        "Vocabulary matching: 'ITEM:' tags not found or parsed incorrectly. Using full response as description."
+                        f"Description for task type {task_type} was empty after parsing, falling back to raw Gemini text."
                     )
                     task_details_dict["description"] = raw_gemini_response_text
-                    task_details_dict["specific_item_tested"] = [
-                        letter[len("ITEM:") :].strip()
-                        for letter in raw_gemini_response_text.split("\n")
-                        if letter.upper().startswith("ITEM:")
-                    ]
 
+                if task_details_dict.get("description") is None:
+                    logger.error(
+                        f"Generated task for {task_type} resulted in None description. Raw response: {raw_gemini_response_text}"
+                    )
+                    task_details_dict["description"] = (
+                        "Error: Could not generate a valid task description."
+                    )
+
+                # --- Link validation for Listening/Describing ---
+                if task_type in [
+                    "Listening (YouTube scene)",
+                    "Describing (image or video)",
+                ]:
+                    if task_type == "Listening (YouTube scene)":
+                        url = extract_first_url(
+                            task_details_dict["description"], youtube_only=True
+                        )
+                        if not url or not is_valid_youtube_url(url):
+                            logger.warning(
+                                f"Invalid or missing YouTube link: {url}. Retrying task generation (attempt {attempt + 1})..."
+                            )
+                            if attempt < max_retries:
+                                continue
+                            else:
+                                task_details_dict["description"] = (
+                                    "Sorry, I couldn't find a valid YouTube video for this task. Please try again."
+                                )
+                    elif task_type == "Describing (image or video)":
+                        url = extract_first_url(task_details_dict["description"])
+                        if (
+                            not url
+                            or ("youtube" in url and not is_valid_youtube_url(url))
+                            or ("image" in url and not is_valid_image_url(url))
+                        ):
+                            logger.warning(
+                                f"Invalid or missing image/video link: {url}. Retrying task generation (attempt {attempt + 1})..."
+                            )
+                            if attempt < max_retries:
+                                continue
+                            else:
+                                task_details_dict["description"] = (
+                                    "Sorry, I couldn't find a valid image or video for this task. Please try again."
+                                )
+                return task_details_dict
             else:
-                task_details_dict["description"] = "\n".join(
-                    other_lines_for_description
-                ).strip()
-                if items_found:
-                    task_details_dict["specific_item_tested"] = items_found[0]
-
-            if not task_details_dict.get("description") and raw_gemini_response_text:
                 logger.warning(
-                    f"Description for task type {task_type} was empty after parsing, falling back to raw Gemini text."
+                    f"Gemini returned empty response for task generation. Prompt feedback: {response.prompt_feedback if response else 'N/A'}"
                 )
-                task_details_dict["description"] = raw_gemini_response_text
-
-            if task_details_dict.get("description") is None:
-                logger.error(
-                    f"Generated task for {task_type} resulted in None description. Raw response: {raw_gemini_response_text}"
-                )
-                task_details_dict["description"] = (
-                    "Error: Could not generate a valid task description."
-                )
-
-            return task_details_dict
-        else:
-            logger.warning(
-                f"Gemini returned empty response for task generation. Prompt feedback: {response.prompt_feedback if response else 'N/A'}"
-            )
+                if attempt < max_retries:
+                    continue
+                return None
+        except Exception as e:
+            logger.error(f"Error generating task with Gemini: {e}", exc_info=True)
             return None
-    except Exception as e:
-        logger.error(f"Error generating task with Gemini: {e}", exc_info=True)
-        return None
+    # If all retries fail
+    return task_details_dict
 
 
 # --- Helper: Evaluate Answer via Gemini ---
@@ -1360,3 +1441,52 @@ def transcribe_voice(bot_token, file_id, gemini_key=None):
             f"Error inside transcribe_voice (Gemini Transcription): {e}", exc_info=True
         )
         return None
+
+
+def is_valid_youtube_url(url):
+    # Use YouTube oEmbed endpoint to check if the video exists
+    oembed_url = f"https://www.youtube.com/oembed?url={url}&format=json"
+    try:
+        resp = requests.get(oembed_url, timeout=5)
+        return resp.status_code == 200
+    except Exception:
+        return False
+
+
+def is_valid_image_url(url):
+    try:
+        resp = requests.head(url, timeout=5, allow_redirects=True)
+        content_type = resp.headers.get("Content-Type", "")
+        return resp.status_code == 200 and ("image" in content_type)
+    except Exception:
+        return False
+
+
+def extract_first_url(text, youtube_only=False):
+    # Simple regex for URLs
+    url_pattern = r"https?://[\w\-\.\?&=/%#]+"
+    urls = re.findall(url_pattern, text)
+    if youtube_only:
+        for url in urls:
+            if "youtube.com" in url or "youtu.be" in url:
+                return url
+        return None
+    return urls[0] if urls else None
+
+
+def youtube_search(query, api_key, max_results=1):
+    url = "https://www.googleapis.com/youtube/v3/search"
+    params = {
+        "part": "snippet",
+        "q": query,
+        "type": "video",
+        "key": api_key,
+        "maxResults": max_results,
+        "safeSearch": "strict",
+    }
+    resp = requests.get(url, params=params, timeout=5)
+    items = resp.json().get("items", [])
+    if items:
+        video_id = items[0]["id"]["videoId"]
+        return f"https://www.youtube.com/watch?v={video_id}"
+    return None
