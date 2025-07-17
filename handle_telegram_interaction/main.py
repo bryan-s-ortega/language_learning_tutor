@@ -98,10 +98,15 @@ I'm your AI-powered English learning assistant. Here's how to get started:
 
 **Task Types Available:**
 • Error correction
-• Vocabulary matching  
-• Idiom/Phrasal verb practice
+• Vocabulary matching
+• Idiom practice
+• Phrasal verb practice
 • Word fluency exercises
 • Voice recording analysis
+• Vocabulary (5 advanced words)
+• Writing (thoughtful question)
+• Listening (YouTube scene)
+• Describing (image or video)
 
 Ready to start learning? Send `/newtask` to begin!
 """
@@ -241,9 +246,14 @@ Thank you for your interest!
 **Task Types:**
 • **Error correction** - Fix grammatical errors in sentences
 • **Vocabulary matching** - Match words with their definitions
-• **Idiom/Phrasal verb** - Learn and practice idioms and phrasal verbs
+• **Idiom practice** - Learn and practice English idioms
+• **Phrasal verb practice** - Learn and practice English phrasal verbs
 • **Word fluency** - Generate words starting with specific letters
 • **Voice recording** - Practice pronunciation with voice analysis
+• **Vocabulary (5 advanced words)** - Learn 5 advanced but common English words and use them in sentences
+• **Writing (thoughtful question)** - Answer a thoughtful, open-ended question with an extensive written response
+• **Listening (YouTube scene)** - Watch a short YouTube scene and answer a comprehension question
+• **Describing (image or video)** - Describe an image or YouTube video in detail
 
 **How it works:**
 1. Send `/newtask` to start
@@ -268,6 +278,54 @@ Happy learning! 🚀
                     bot_token,
                     chat_id,
                     "📊 **Learning Progress**: You haven't completed any tasks yet. Start practicing to see your progress!",
+                )
+            return "OK", 200
+
+        elif message_text.lower() == "/difficulty":
+            logger.info(f"/difficulty command received from user {user_doc_id}")
+            current_state = get_firestore_state(user_doc_id=user_doc_id)
+            current_level = current_state.get("difficulty_level", "advanced")
+            difficulty_keyboard = {
+                "keyboard": [["beginner"], ["intermediate"], ["advanced"]],
+                "one_time_keyboard": True,
+                "resize_keyboard": True,
+            }
+            send_telegram_message(
+                bot_token,
+                chat_id,
+                f"**Current difficulty level:** {current_level.capitalize()}\n\nChoose your desired difficulty:",
+                reply_markup=difficulty_keyboard,
+            )
+            # Set a state so we know to update on next message
+            update_firestore_state(
+                {"interaction_state": "awaiting_difficulty_choice"},
+                user_doc_id=user_doc_id,
+            )
+            return "OK", 200
+
+        # Handle difficulty selection
+        current_state = get_firestore_state(user_doc_id=user_doc_id)
+        interaction_state = current_state.get("interaction_state", "idle")
+        if interaction_state == "awaiting_difficulty_choice":
+            if message_text.lower() in ["beginner", "intermediate", "advanced"]:
+                update_firestore_state(
+                    {
+                        "difficulty_level": message_text.lower(),
+                        "interaction_state": "idle",
+                    },
+                    user_doc_id=user_doc_id,
+                )
+                send_telegram_message(
+                    bot_token,
+                    chat_id,
+                    f"✅ Difficulty level set to: {message_text.capitalize()}!",
+                    reply_markup={"remove_keyboard": True},
+                )
+            else:
+                send_telegram_message(
+                    bot_token,
+                    chat_id,
+                    "Please choose a valid difficulty: beginner, intermediate, or advanced.",
                 )
             return "OK", 200
 
@@ -490,7 +548,12 @@ Happy learning! 🚀
             item_type_for_proficiency = None
             items_to_update = []
 
-            if task_type == "Idiom/Phrasal verb" and specific_item_tested:
+            if task_type == "Idiom" and specific_item_tested:
+                item_type_for_proficiency = (
+                    "phrasal_verbs"  # Or use 'idioms' if you want to track separately
+                )
+                items_to_update.append(specific_item_tested)
+            elif task_type == "Phrasal verb" and specific_item_tested:
                 item_type_for_proficiency = "phrasal_verbs"
                 items_to_update.append(specific_item_tested)
             elif task_type == "Error correction" and specific_item_tested:
@@ -501,7 +564,7 @@ Happy learning! 🚀
             ):
                 item_type_for_proficiency = "vocabulary_words"
                 items_to_update.extend(specific_item_tested)
-
+            # For new tasks, only update proficiency if a specific item and type are defined
             if (
                 item_type_for_proficiency
                 and items_to_update

@@ -504,6 +504,10 @@ def generate_task(gemini_key, task_type, user_doc_id, topic=None):
     # Get user proficiency data for adaptive learning
     proficiency_data = get_user_proficiency(user_doc_id)
 
+    # Get user difficulty level from Firestore state
+    user_state = get_firestore_state(user_doc_id)
+    difficulty_level = user_state.get("difficulty_level", "advanced")
+
     # Analyze weak areas for this task type
     weak_items = analyze_user_weaknesses(proficiency_data, task_type)
 
@@ -536,18 +540,50 @@ def generate_task(gemini_key, task_type, user_doc_id, topic=None):
         )
     elif task_type == "Vocabulary matching":
         prompt = prompt_base + (
-            "Provide 3 related English vocabulary words suitable for an advanced learner. "
+            f"Provide 3 related English vocabulary words suitable for a {difficulty_level} learner. "
             "For each word, on a NEW line, identify it like 'ITEM: [word]'. "
             "After listing all ITEMs, provide their definitions. "
             "The definitions should be presented in a jumbled or randomized order. "
             "Make it clear they need to match them (e.g., 'Match the words with their definitions below.')."
         )
-    elif task_type == "Idiom/Phrasal verb":
+    elif task_type == "Idiom":
         prompt = prompt_base + (
-            "Choose one common English idiom or phrasal verb. "
-            "On a NEW line, identify it clearly, like 'ITEM: [idiom/phrasal verb phrase]'. "
+            "Choose one common English idiom. "
+            "On a NEW line, identify it clearly, like 'ITEM: [idiom]'. "
             "Then, on subsequent lines, explain its meaning and provide one clear example sentence. "
             "Finally, ask the user to write their own sentence using it."
+        )
+    elif task_type == "Phrasal verb":
+        prompt = prompt_base + (
+            "Choose one common English phrasal verb. "
+            "On a NEW line, identify it clearly, like 'ITEM: [phrasal verb]'. "
+            "Then, on subsequent lines, explain its meaning and provide one clear example sentence. "
+            "Finally, ask the user to write their own sentence using it."
+        )
+    elif task_type == "Vocabulary (5 advanced words)":
+        prompt = prompt_base + (
+            f"Provide 5 English words suitable for a {difficulty_level} learner. "
+            "For each word, on a NEW line, identify it like 'ITEM: [word]'. "
+            "After listing all ITEMs, provide their definitions. "
+            "Make it clear the user should try to use each word in a sentence."
+        )
+    elif task_type == "Writing (thoughtful question)":
+        prompt = prompt_base + (
+            "Ask the user a thoughtful, open-ended question that encourages them to write an extensive answer (at least 5 sentences). "
+            "The question should be relevant to daily life, culture, or personal growth. "
+            "Make it clear that the user should write as much as possible."
+        )
+    elif task_type == "Listening (YouTube scene)":
+        prompt = prompt_base + (
+            f"Share a short scene from a movie or TV series on YouTube (provide the link) suitable for a {difficulty_level} English learner. "
+            "Ask the user to watch the scene and then answer a comprehension question about it. "
+            "The question should check their understanding of the main idea or details, and be appropriate for the chosen English learner difficulty."
+        )
+    elif task_type == "Describing (image or video)":
+        prompt = prompt_base + (
+            f"Share an image or a YouTube video link suitable for a {difficulty_level} English learner. "
+            "Ask the user to provide a comprehensive description of what they see. "
+            "Encourage the user to use as much detail as possible in their description, and tailor the expected detail to the chosen English learner difficulty."
         )
     elif task_type == "Word starting with letter":
         letter = random.choice("ABCDEFGHIJKLMNOPQRSTUVWXYZ")

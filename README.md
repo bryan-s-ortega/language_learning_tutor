@@ -10,10 +10,11 @@ An intelligent, adaptive English learning tutor built with Google Cloud Function
 
 ### Usage
 
-1. **Start Learning**: Send `/newtask` to your Telegram bot
-2. **Check Progress**: Use `/progress` to see your learning statistics
-3. **Practice**: Complete tasks and receive personalized feedback
-4. **Voice Practice**: Send voice messages for pronunciation analysis
+1. **Start Learning**: Send `/newtask` to your Telegram bot to start learning.  
+2. **Set Difficulty**: Use `/difficulty` to choose your English learner level (beginner, intermediate, advanced)
+3. **Check Progress**: Use `/progress` to see your learning statistics
+4. **Practice**: Complete tasks and receive personalized feedback
+5. **Voice Practice**: Send voice messages for pronunciation analysis
 
 ## 🎯 Overview
 
@@ -30,7 +31,18 @@ This project implements a sophisticated language learning system that:
 ## 🚀 Features
 
 ### Core Learning Features
-- **5 Task Types**: Error correction, vocabulary matching, idioms/phrasal verbs, word fluency, and voice recording analysis
+- **10 Task Types**:
+  - Error correction
+  - Vocabulary matching
+  - Idiom practice
+  - Phrasal verb practice
+  - Word fluency
+  - Voice recording analysis
+  - Vocabulary (5 advanced words)
+  - Writing (thoughtful question)
+  - Listening (YouTube scene)
+  - Describing (image or video)
+- **Difficulty Setting**: Users can set their English learner level (beginner, intermediate, advanced) with `/difficulty`. Vocabulary, describing, and listening tasks adapt to this setting.
 - **Real-time Feedback**: Instant AI-powered evaluation and personalized feedback
 - **Voice Support**: Speech-to-text transcription and pronunciation analysis
 - **Interactive Interface**: Telegram keyboard buttons for seamless navigation
@@ -68,23 +80,6 @@ This project implements a sophisticated language learning system that:
 - **Google Cloud CLI**: Deployment and management
 - **UV**: Fast Python package manager
 
-## Multi-User Management
-
-This guide explains how to use the multi-user adaptation of the Language Learning Tutor bot.  
-The multi-user system uses Google Secret Manager to store user lists:
-
-### Retrieve admin chat ID
-```bash
-gcloud secrets versions access latest --secret=telegram-user-id
-```
-
-```bash
-# Create authorized users secret (replace with actual chat IDs)
-echo -n "6131994467" | gcloud secrets versions add authorized-users --data-file=-
-# Create admin users secret (replace with actual chat IDs)
-echo -n "6131994467" | gcloud secrets versions add admin-users --data-file=-
-```
-
 ## Admin Commands
 
 ### Available Commands
@@ -98,3 +93,17 @@ echo -n "6131994467" | gcloud secrets versions add admin-users --data-file=-
 | `/stats` | System statistics | Yes |
 | `/help` | Show user help | No |
 | `/progress` | Show learning progress | No |
+| `/difficulty` | Set your English learner difficulty (beginner, intermediate, advanced) | No |
+
+## Task Types & Difficulty
+
+- **Error correction**: Fix grammatical errors in sentences
+- **Vocabulary matching**: Match words with their definitions (difficulty affects word level)
+- **Idiom practice**: Learn and practice English idioms
+- **Phrasal verb practice**: Learn and practice English phrasal verbs
+- **Word fluency**: Generate words starting with specific letters
+- **Voice recording analysis**: Practice pronunciation with voice analysis
+- **Vocabulary (5 advanced words)**: Learn 5 words and use them in sentences (difficulty affects word level)
+- **Writing (thoughtful question)**: Answer a thoughtful, open-ended question
+- **Listening (YouTube scene)**: Watch a YouTube scene and answer a comprehension question (difficulty affects scene and question complexity for English learners)
+- **Describing (image or video)**: Describe an image or YouTube video in detail (difficulty affects expected detail and complexity for English learners)

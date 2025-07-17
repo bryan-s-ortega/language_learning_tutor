@@ -59,9 +59,14 @@ class TaskConfig:
             self.task_types = [
                 "Error correction",
                 "Vocabulary matching",
-                "Idiom/Phrasal verb",
+                "Idiom",
+                "Phrasal verb",
                 "Word starting with letter",
                 "Voice Recording Analysis",
+                "Vocabulary (5 advanced words)",
+                "Writing (thoughtful question)",
+                "Listening (YouTube scene)",
+                "Describing (image or video)",
             ]
 
 
