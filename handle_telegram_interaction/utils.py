@@ -3,14 +3,10 @@ import random
 import requests
 import logging
 import datetime
-import sys
-import os
 from typing import Optional, Dict, Any, List
 from config import config
 import re
 import google.generativeai as genai
-
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 logging.basicConfig(
     level=getattr(logging, config.logging.level), format=config.logging.format
