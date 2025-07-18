@@ -36,8 +36,6 @@ class TaskConfig:
                 "Voice Recording Analysis",
                 "Vocabulary",
                 "Writing",
-                "Listening",
-                "Describing",
             ]
 
 

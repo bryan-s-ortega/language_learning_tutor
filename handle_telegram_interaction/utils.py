@@ -7,319 +7,216 @@ import sys
 import os
 from typing import Optional, Dict, Any, List
 from config import config
-
-from google.cloud import secretmanager
-from google.cloud import firestore
-from google.cloud import speech
-import google.generativeai as genai
 import re
+import google.generativeai as genai
 
-# Add the parent directory to the path to import config
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Configure structured logging
 logging.basicConfig(
     level=getattr(logging, config.logging.level), format=config.logging.format
 )
 logger = logging.getLogger(__name__)
 
-# Initialize clients with error handling
-try:
-    secret_client = secretmanager.SecretManagerServiceClient()
-    db = firestore.Client(project=config.database.project_id)
-    speech_client = speech.SpeechClient()
-except Exception as e:
-    logger.error(f"Failed to initialize Google Cloud clients: {e}")
-    raise
+
+# --- Lazy Google Cloud Client Initialization ---
+def get_secret_client():
+    if not hasattr(get_secret_client, "_client"):
+        from google.cloud import secretmanager
+
+        get_secret_client._client = secretmanager.SecretManagerServiceClient()
+    return get_secret_client._client
 
 
+def get_firestore_client():
+    if not hasattr(get_firestore_client, "_client"):
+        from google.cloud import firestore
+
+        get_firestore_client._client = firestore.Client(
+            project=config.database.project_id
+        )
+        get_firestore_client.SERVER_TIMESTAMP = firestore.SERVER_TIMESTAMP
+        get_firestore_client.transactional = firestore.transactional
+    return get_firestore_client._client
+
+
+def get_firestore_server_timestamp():
+    return get_firestore_client().SERVER_TIMESTAMP
+
+
+def get_firestore_transactional():
+    return get_firestore_client().transactional
+
+
+def get_speech_client():
+    if not hasattr(get_speech_client, "_client"):
+        from google.cloud import speech
+
+        get_speech_client._client = speech.SpeechClient()
+    return get_speech_client._client
+
+
+# --- Exception Classes ---
 class LanguageLearningError(Exception):
-    """Base exception for language learning application"""
-
     pass
 
 
 class SecretAccessError(LanguageLearningError):
-    """Raised when secret access fails"""
-
     pass
 
 
 class FirestoreError(LanguageLearningError):
-    """Raised when Firestore operations fail"""
-
     pass
 
 
 class TelegramAPIError(LanguageLearningError):
-    """Raised when Telegram API calls fail"""
-
     pass
 
 
 class GeminiAPIError(LanguageLearningError):
-    """Raised when Gemini API calls fail"""
-
     pass
 
 
-# --- Helper: Access Secret ---
+# --- Secret Caching ---
+_secret_cache = {}
+
+
 def access_secret_version(secret_id: str, version_id: str = "latest") -> str:
-    """
-    Access a secret version from Google Secret Manager.
-
-    Args:
-        secret_id: The secret ID to access
-        version_id: The version ID (defaults to "latest")
-
-    Returns:
-        The secret value as a string
-
-    Raises:
-        SecretAccessError: If secret access fails
-    """
+    cache_key = f"{secret_id}:{version_id}"
+    if cache_key in _secret_cache:
+        return _secret_cache[cache_key]
     if not config.database.project_id:
         error_msg = (
             "GCP_PROJECT environment variable not set or PROJECT_ID constant is empty."
         )
         logger.critical(error_msg)
         raise SecretAccessError(error_msg)
-
     name = f"projects/{config.database.project_id}/secrets/{secret_id}/versions/{version_id}"
-
     try:
-        response = secret_client.access_secret_version(request={"name": name})
+        response = get_secret_client().access_secret_version(request={"name": name})
+        secret_value = response.payload.data.decode("UTF-8")
+        _secret_cache[cache_key] = secret_value
         logger.debug(f"Successfully accessed secret: {secret_id}")
-        return response.payload.data.decode("UTF-8")
+        return secret_value
     except Exception as e:
         error_msg = f"Error accessing secret {secret_id}: {e}"
         logger.error(error_msg, exc_info=True)
         raise SecretAccessError(error_msg) from e
 
 
-# --- Multi-User Authentication Helpers ---
-def get_authorized_users() -> List[str]:
-    """
-    Get list of authorized user chat IDs.
-
-    Returns:
-        List of authorized user chat IDs
-
-    Raises:
-        SecretAccessError: If secret access fails
-    """
+# --- User Management Helpers ---
+def _get_users_from_secret(secret_id: str) -> List[str]:
     try:
-        users_data = access_secret_version(config.secrets.authorized_users_secret_id)
-
-        # Handle both JSON array format and line-separated format
+        users_data = access_secret_version(secret_id)
         if users_data.strip().startswith("["):
-            # JSON array format
             return json.loads(users_data)
-        else:
-            # Line-separated format or single value
-            users = [
-                line.strip() for line in users_data.strip().split("\n") if line.strip()
-            ]
-            logger.debug(f"Retrieved {len(users)} authorized users")
-            return users
+        return [line.strip() for line in users_data.strip().split("\n") if line.strip()]
     except Exception as e:
-        logger.error(f"Error getting authorized users: {e}", exc_info=True)
+        logger.error(f"Error getting users from secret {secret_id}: {e}", exc_info=True)
         return []
+
+
+def get_authorized_users() -> List[str]:
+    return _get_users_from_secret(config.secrets.authorized_users_secret_id)
 
 
 def get_admin_users() -> List[str]:
-    """
-    Get list of admin user chat IDs.
+    return _get_users_from_secret(config.secrets.admin_users_secret_id)
 
-    Returns:
-        List of admin user chat IDs
 
-    Raises:
-        SecretAccessError: If secret access fails
-    """
+def update_user_list(secret_id: str, chat_id: str, add: bool) -> bool:
+    users = _get_users_from_secret(secret_id)
+    chat_id = str(chat_id)
+    if add and chat_id not in users:
+        users.append(chat_id)
+    elif not add and chat_id in users:
+        users.remove(chat_id)
     try:
-        users_data = access_secret_version(config.secrets.admin_users_secret_id)
-
-        # Handle both JSON array format and line-separated format
-        if users_data.strip().startswith("["):
-            # JSON array format
-            return json.loads(users_data)
-        else:
-            # Line-separated format or single value
-            users = [
-                line.strip() for line in users_data.strip().split("\n") if line.strip()
-            ]
-            logger.debug(f"Retrieved {len(users)} admin users")
-            return users
+        users_text = "\n".join(users)
+        secret_name = f"projects/{config.database.project_id}/secrets/{secret_id}"
+        get_secret_client().add_secret_version(
+            request={
+                "parent": secret_name,
+                "payload": {"data": users_text.encode("UTF-8")},
+            }
+        )
+        return True
     except Exception as e:
-        logger.error(f"Error getting admin users: {e}", exc_info=True)
-        return []
+        logger.error(f"Error updating user list secret {secret_id}: {e}", exc_info=True)
+        return False
+
+
+def add_user_to_whitelist(chat_id: str) -> bool:
+    return update_user_list(
+        config.secrets.authorized_users_secret_id, chat_id, add=True
+    )
+
+
+def remove_user_from_whitelist(chat_id: str) -> bool:
+    return update_user_list(
+        config.secrets.authorized_users_secret_id, chat_id, add=False
+    )
 
 
 def is_user_authorized(chat_id: str) -> bool:
-    """
-    Check if user is authorized.
-
-    Args:
-        chat_id: The user's chat ID
-
-    Returns:
-        True if user is authorized, False otherwise
-    """
     try:
         authorized_users = get_authorized_users()
         is_authorized = str(chat_id) in authorized_users
         logger.debug(f"User {chat_id} authorization check: {is_authorized}")
         return is_authorized
     except Exception as e:
-        logger.error(f"Error checking user authorization for {chat_id}: {e}")
+        logger.error(
+            f"Error checking user authorization for {chat_id}: {e}", exc_info=True
+        )
         return False
 
 
 def is_admin_user(chat_id: str) -> bool:
-    """
-    Check if user is an admin.
-
-    Args:
-        chat_id: The user's chat ID
-
-    Returns:
-        True if user is admin, False otherwise
-    """
     try:
         admin_users = get_admin_users()
         is_admin = str(chat_id) in admin_users
         logger.debug(f"User {chat_id} admin check: {is_admin}")
         return is_admin
     except Exception as e:
-        logger.error(f"Error checking admin status for {chat_id}: {e}")
+        logger.error(f"Error checking admin status for {chat_id}: {e}", exc_info=True)
         return False
 
 
-def add_user_to_whitelist(chat_id: str) -> bool:
-    """
-    Add a user to the authorized users list.
-
-    Args:
-        chat_id: The user's chat ID to add
-
-    Returns:
-        True if successful, False otherwise
-    """
+# --- Firestore Helpers ---
+def get_firestore_state(user_doc_id: str) -> Dict[str, Any]:
     try:
-        current_users = get_authorized_users()
-        if str(chat_id) not in current_users:
-            current_users.append(str(chat_id))
-            # Save in line-separated format
-            users_text = "\n".join(current_users)
-
-            # Update the secret
-            secret_name = f"projects/{config.database.project_id}/secrets/{config.secrets.authorized_users_secret_id}"
-            secret_client.add_secret_version(
-                request={
-                    "parent": secret_name,
-                    "payload": {"data": users_text.encode("UTF-8")},
-                }
-            )
-            logger.info(f"Added user {chat_id} to authorized users")
-            return True
+        db = get_firestore_client()
+        doc_ref = db.collection(config.database.firestore_collection).document(
+            user_doc_id
+        )
+        doc = doc_ref.get()
+        if doc.exists:
+            state_data = doc.to_dict()
+            logger.debug(f"Retrieved state for user {user_doc_id}: {state_data}")
+            return state_data
         else:
-            logger.info(f"User {chat_id} already authorized")
-            return True
-    except Exception as e:
-        logger.error(f"Error adding user {chat_id} to whitelist: {e}", exc_info=True)
-        return False
-
-
-def remove_user_from_whitelist(chat_id: str) -> bool:
-    """
-    Remove a user from the authorized users list.
-
-    Args:
-        chat_id: The user's chat ID to remove
-
-    Returns:
-        True if successful, False otherwise
-    """
-    try:
-        current_users = get_authorized_users()
-        if str(chat_id) in current_users:
-            current_users.remove(str(chat_id))
-            # Save in line-separated format
-            users_text = "\n".join(current_users)
-
-            # Update the secret
-            secret_name = f"projects/{config.database.project_id}/secrets/{config.secrets.authorized_users_secret_id}"
-            secret_client.add_secret_version(
-                request={
-                    "parent": secret_name,
-                    "payload": {"data": users_text.encode("UTF-8")},
-                }
-            )
-            logger.info(f"Removed user {chat_id} from authorized users")
-            return True
-        else:
-            logger.info(f"User {chat_id} not found in authorized users")
-            return False
+            logger.debug(f"No existing state found for user {user_doc_id}")
+            return {}
     except Exception as e:
         logger.error(
-            f"Error removing user {chat_id} from whitelist: {e}", exc_info=True
+            f"Error getting Firestore state for user {user_doc_id}: {e}", exc_info=True
+        )
+        return {}
+
+
+def update_firestore_state(state_data: Dict[str, Any], user_doc_id: str) -> bool:
+    try:
+        db = get_firestore_client()
+        doc_ref = db.collection(config.database.firestore_collection).document(
+            user_doc_id
+        )
+        doc_ref.set(state_data, merge=True)
+        logger.debug(f"Updated state for user {user_doc_id}: {state_data}")
+        return True
+    except Exception as e:
+        logger.error(
+            f"Error updating Firestore state for user {user_doc_id}: {e}", exc_info=True
         )
         return False
-
-
-def get_system_statistics() -> Dict[str, Any]:
-    """
-    Get overall system statistics.
-
-    Returns:
-        Dictionary containing system statistics
-    """
-    stats = {
-        "total_users": 0,
-        "active_users_today": 0,
-        "total_tasks_completed": 0,
-        "average_accuracy": 0.0,
-    }
-
-    try:
-        # Count total users
-        authorized_users = get_authorized_users()
-        stats["total_users"] = len(authorized_users)
-
-        # Calculate system-wide statistics
-        total_accuracy = 0.0
-        total_tasks = 0
-        active_users = 0
-
-        for user_id in authorized_users:
-            # Get user proficiency data
-            proficiency_data = get_user_proficiency(user_id)
-            if proficiency_data:
-                user_tasks = 0
-                user_correct = 0
-
-                for category, items in proficiency_data.items():
-                    for item_name, item_stats in items.items():
-                        user_tasks += item_stats.get("attempts", 0)
-                        user_correct += item_stats.get("correct", 0)
-
-                total_tasks += user_tasks
-                if user_tasks > 0:
-                    total_accuracy += user_correct / user_tasks
-                    active_users += 1
-
-        stats["active_users_today"] = active_users
-        stats["total_tasks_completed"] = total_tasks
-        stats["average_accuracy"] = (
-            (total_accuracy / active_users * 100) if active_users > 0 else 0.0
-        )
-
-        logger.info(f"System statistics calculated: {stats}")
-        return stats
-    except Exception as e:
-        logger.error(f"Error calculating system statistics: {e}", exc_info=True)
-        return stats
 
 
 # --- Rate Limiting ---
@@ -343,6 +240,7 @@ def check_rate_limit(
         True if user is within rate limit, False otherwise
     """
     try:
+        db = get_firestore_client()
         doc_ref = db.collection("rate_limits").document(
             get_user_rate_limit_key(user_id)
         )
@@ -442,64 +340,6 @@ def send_telegram_message(
         return False
 
 
-# --- Firestore Helpers ---
-def get_firestore_state(user_doc_id: str) -> Dict[str, Any]:
-    """
-    Get user's current state from Firestore.
-
-    Args:
-        user_doc_id: The user's document ID
-
-    Returns:
-        Dictionary containing user state
-    """
-    try:
-        doc_ref = db.collection(config.database.firestore_collection).document(
-            user_doc_id
-        )
-        doc = doc_ref.get()
-
-        if doc.exists:
-            state_data = doc.to_dict()
-            logger.debug(f"Retrieved state for user {user_doc_id}: {state_data}")
-            return state_data
-        else:
-            logger.debug(f"No existing state found for user {user_doc_id}")
-            return {}
-
-    except Exception as e:
-        logger.error(
-            f"Error getting Firestore state for user {user_doc_id}: {e}", exc_info=True
-        )
-        return {}
-
-
-def update_firestore_state(state_data: Dict[str, Any], user_doc_id: str) -> bool:
-    """
-    Update user's state in Firestore.
-
-    Args:
-        state_data: The state data to update
-        user_doc_id: The user's document ID
-
-    Returns:
-        True if successful, False otherwise
-    """
-    try:
-        doc_ref = db.collection(config.database.firestore_collection).document(
-            user_doc_id
-        )
-        doc_ref.set(state_data, merge=True)
-        logger.debug(f"Updated state for user {user_doc_id}: {state_data}")
-        return True
-
-    except Exception as e:
-        logger.error(
-            f"Error updating Firestore state for user {user_doc_id}: {e}", exc_info=True
-        )
-        return False
-
-
 # --- Helper: Generate Task via Gemini ---
 def generate_task(gemini_key, task_type, user_doc_id, topic=None):
     # Get user proficiency data for adaptive learning
@@ -565,7 +405,7 @@ def generate_task(gemini_key, task_type, user_doc_id, topic=None):
             "Then, on subsequent lines, explain its meaning and provide one clear example sentence. "
             "Finally, ask the user to write their own sentence using it."
         )
-    elif task_type == "Vocabulary (5 advanced words)":
+    elif task_type == "Vocabulary":
         prompt = prompt_base + (
             instruction_prefix
             + f"Provide 5 English words suitable for a {difficulty_level} learner. "
@@ -573,7 +413,7 @@ def generate_task(gemini_key, task_type, user_doc_id, topic=None):
             "After listing all ITEMs, provide their definitions. "
             "Make it clear the user should try to use each word in a sentence."
         )
-    elif task_type == "Writing (thoughtful question)":
+    elif task_type == "Writing":
         prompt = prompt_base + (
             instruction_prefix
             + "Ask the user a thoughtful, open-ended question that encourages them to write an extensive answer (at least 5 sentences). "
@@ -978,6 +818,7 @@ def send_choice_request_message(bot_token, chat_id, user_doc_id):
 # --- Helper: Get User Proficiency ---
 def get_user_proficiency(user_doc_id):
     try:
+        db = get_firestore_client()
         doc_ref = db.collection(config.database.proficiency_collection).document(
             user_doc_id
         )
@@ -1302,7 +1143,6 @@ def generate_progress_report(proficiency_data):
 
 
 # --- Helper: Update User Proficiency ---
-@firestore.transactional
 def _update_proficiency_transaction(
     transaction, doc_ref, item_type_key, item_name, is_correct, task_id="unknown"
 ):
@@ -1330,11 +1170,11 @@ def _update_proficiency_transaction(
     else:
         item_stats["mastery_level"] = 0.0
 
-    item_stats["last_attempt_timestamp"] = firestore.SERVER_TIMESTAMP
+    item_stats["last_attempt_timestamp"] = get_firestore_server_timestamp()
     item_stats["last_task_id"] = task_id
 
     item_stats["history"].append(
-        {"timestamp": firestore.SERVER_TIMESTAMP, "correct": is_correct}
+        {"timestamp": get_firestore_server_timestamp(), "correct": is_correct}
     )
     if len(item_stats["history"]) > 1000:
         item_stats["history"] = item_stats["history"][-1000:]
@@ -1355,6 +1195,7 @@ def update_user_proficiency(
             f"Subjective task {item_name}, not updating mastery, only history/timestamp."
         )
     try:
+        db = get_firestore_client()
         doc_ref = db.collection(config.database.proficiency_collection).document(
             user_doc_id
         )

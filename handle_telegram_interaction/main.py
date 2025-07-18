@@ -3,6 +3,7 @@ import requests
 from datetime import datetime
 import sys
 import os
+from typing import Any, Dict
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -33,21 +34,21 @@ _bot_token = None
 _gemini_key = None
 
 
-def get_bot_token():
+def get_bot_token() -> str:
     global _bot_token
     if _bot_token is None:
         _bot_token = access_secret_version(config.secrets.telegram_token_secret_id)
     return _bot_token
 
 
-def get_gemini_key():
+def get_gemini_key() -> str:
     global _gemini_key
     if _gemini_key is None:
         _gemini_key = access_secret_version(config.secrets.gemini_api_key_secret_id)
     return _gemini_key
 
 
-def send_user_error(bot_token, chat_id, message):
+def send_user_error(bot_token: str, chat_id: str, message: str) -> None:
     try:
         send_telegram_message(bot_token, chat_id, message)
     except Exception as e:
@@ -56,8 +57,125 @@ def send_user_error(bot_token, chat_id, message):
         )
 
 
+# --- Command Handlers ---
+def handle_start(bot_token: str, chat_id: str, user_doc_id: str, **kwargs) -> str:
+    if is_user_authorized(chat_id):
+        welcome_message = """
+🎓 **Welcome to the Language Learning Tutor!**
+
+I'm your AI-powered English learning assistant. Here's how to get started:
+
+**Available Commands:**
+• `/newtask` - Start a new learning task
+• `/progress` - View your learning progress
+• `/help` - Show this help message
+
+**Task Types Available:**
+• Error correction
+• Vocabulary matching
+• Idiom practice
+• Phrasal verb practice
+• Word fluency exercises
+• Voice recording analysis
+• Vocabulary
+• Writing
+
+Ready to start learning? Send `/newtask` to begin!
+"""
+        send_telegram_message(bot_token, chat_id, welcome_message)
+    else:
+        access_message = f"""
+🚫 **Access Required**
+
+You're not currently authorized to use this Language Learning Tutor bot.
+
+**To get access:**
+Please contact the administrator and provide your chat ID: `{chat_id}`
+
+Once you're added to the authorized users list, you'll be able to start learning English with personalized AI-powered tasks.
+
+Thank you for your interest!
+"""
+        send_telegram_message(bot_token, chat_id, access_message)
+    return "OK", 200
+
+
+def handle_help(bot_token: str, chat_id: str, **kwargs) -> str:
+    help_message = """
+🎓 **Language Learning Tutor - Help**
+
+**Available Commands:**
+• `/start` - Welcome message and bot introduction
+• `/newtask` - Start a new learning task
+• `/progress` - View your learning progress
+• `/help` - Show this help message
+
+**Task Types:**
+• **Error correction** - Fix grammatical errors in sentences
+• **Vocabulary matching** - Match words with their definitions
+• **Idiom practice** - Learn and practice English idioms
+• **Phrasal verb practice** - Learn and practice English phrasal verbs
+• **Word fluency** - Generate words starting with specific letters
+• **Voice recording** - Practice pronunciation with voice analysis
+• **Vocabulary** - Learn 5 advanced but common English words and use them in sentences
+• **Writing** - Answer a thoughtful, open-ended question with an extensive written response
+
+**How it works:**
+1. Send `/newtask` to start
+2. Choose a task type from the keyboard
+3. Complete the task (text or voice)
+4. Receive personalized feedback
+5. Track your progress with `/progress`
+
+Happy learning! 🚀
+"""
+    send_telegram_message(bot_token, chat_id, help_message)
+    return "OK", 200
+
+
+def handle_progress(bot_token: str, chat_id: str, user_doc_id: str, **kwargs) -> str:
+    proficiency_data = get_user_proficiency(user_doc_id)
+    if proficiency_data:
+        progress_message = generate_progress_report(proficiency_data)
+        send_telegram_message(bot_token, chat_id, progress_message)
+    else:
+        send_telegram_message(
+            bot_token,
+            chat_id,
+            "📊 **Learning Progress**: You haven't completed any tasks yet. Start practicing to see your progress!",
+        )
+    return "OK", 200
+
+
+def handle_difficulty(
+    bot_token: str,
+    chat_id: str,
+    user_doc_id: str,
+    current_state: Dict[str, Any],
+    **kwargs,
+) -> str:
+    current_level = current_state.get("difficulty_level", "advanced")
+    difficulty_keyboard = {
+        "keyboard": [["beginner"], ["intermediate"], ["advanced"]],
+        "one_time_keyboard": True,
+        "resize_keyboard": True,
+    }
+    send_telegram_message(
+        bot_token,
+        chat_id,
+        f"**Current difficulty level:** {current_level.capitalize()}\n\nChoose your desired difficulty:",
+        reply_markup=difficulty_keyboard,
+    )
+    update_firestore_state(
+        {"interaction_state": "awaiting_difficulty_choice"},
+        user_doc_id=user_doc_id,
+    )
+    return "OK", 200
+
+
+# --- Main Handler ---
 @functions_framework.http
-def handle_telegram_interaction(request):
+def handle_telegram_interaction(request) -> Any:
     import uuid
 
     request_id = str(uuid.uuid4())[:8]
@@ -106,49 +224,27 @@ def handle_telegram_interaction(request):
             )
             return "OK", 200
 
-        if message_text.lower() == "/start":
-            if is_user_authorized(chat_id):
-                welcome_message = """
-🎓 **Welcome to the Language Learning Tutor!**
+        # Command dispatch dictionary
+        command_handlers = {
+            "/start": handle_start,
+            "/help": handle_help,
+            "/progress": handle_progress,
+            "/difficulty": handle_difficulty,
+        }
 
-I'm your AI-powered English learning assistant. Here's how to get started:
-
-**Available Commands:**
-• `/newtask` - Start a new learning task
-• `/progress` - View your learning progress
-• `/help` - Show this help message
-
-**Task Types Available:**
-• Error correction
-• Vocabulary matching
-• Idiom practice
-• Phrasal verb practice
-• Word fluency exercises
-• Voice recording analysis
-• Vocabulary
-• Writing
-• Listening
-• Describing
-
-Ready to start learning? Send `/newtask` to begin!
-"""
-                send_telegram_message(bot_token, chat_id, welcome_message)
+        # Handle commands
+        if message_text.lower() in command_handlers:
+            handler = command_handlers[message_text.lower()]
+            if message_text.lower() == "/difficulty":
+                return handler(
+                    bot_token, chat_id, user_doc_id, current_state=current_state
+                )
+            elif message_text.lower() in ["/start", "/progress"]:
+                return handler(bot_token, chat_id, user_doc_id)
             else:
-                access_message = f"""
-🚫 **Access Required**
+                return handler(bot_token, chat_id)
 
-You're not currently authorized to use this Language Learning Tutor bot.
-
-**To get access:**
-Please contact the administrator and provide your chat ID: `{chat_id}`
-
-Once you're added to the authorized users list, you'll be able to start learning English with personalized AI-powered tasks.
-
-Thank you for your interest!
-"""
-                send_telegram_message(bot_token, chat_id, access_message)
-            return "OK", 200
-
+        # Multi-user authentication
         if not is_user_authorized(chat_id):
             send_user_error(
                 bot_token,
@@ -187,6 +283,7 @@ Thank you for your interest!
         if message_text is None:
             message_text = ""
 
+        # New task command
         if message_text.lower() == "/newtask":
             reset_state_data = {
                 "interaction_state": "awaiting_choice",
@@ -214,74 +311,7 @@ Thank you for your interest!
                 )
             return "OK", 200
 
-        elif message_text.lower() == "/help":
-            help_message = """
-🎓 **Language Learning Tutor - Help**
-
-**Available Commands:**
-• `/start` - Welcome message and bot introduction
-• `/newtask` - Start a new learning task
-• `/progress` - View your learning progress
-• `/help` - Show this help message
-
-**Task Types:**
-• **Error correction** - Fix grammatical errors in sentences
-• **Vocabulary matching** - Match words with their definitions
-• **Idiom practice** - Learn and practice English idioms
-• **Phrasal verb practice** - Learn and practice English phrasal verbs
-• **Word fluency** - Generate words starting with specific letters
-• **Voice recording** - Practice pronunciation with voice analysis
-• **Vocabulary** - Learn 5 advanced but common English words and use them in sentences
-• **Writing** - Answer a thoughtful, open-ended question with an extensive written response
-• **Listening** - Watch a short YouTube scene and answer a comprehension question
-• **Describing** - Describe an image or YouTube video in detail
-
-**How it works:**
-1. Send `/newtask` to start
-2. Choose a task type from the keyboard
-3. Complete the task (text or voice)
-4. Receive personalized feedback
-5. Track your progress with `/progress`
-
-Happy learning! 🚀
-"""
-            send_telegram_message(bot_token, chat_id, help_message)
-            return "OK", 200
-
-        elif message_text.lower() == "/progress":
-            proficiency_data = get_user_proficiency(user_doc_id)
-            if proficiency_data:
-                progress_message = generate_progress_report(proficiency_data)
-                send_telegram_message(bot_token, chat_id, progress_message)
-            else:
-                send_telegram_message(
-                    bot_token,
-                    chat_id,
-                    "📊 **Learning Progress**: You haven't completed any tasks yet. Start practicing to see your progress!",
-                )
-            return "OK", 200
-
-        elif message_text.lower() == "/difficulty":
-            current_level = current_state.get("difficulty_level", "advanced")
-            difficulty_keyboard = {
-                "keyboard": [["beginner"], ["intermediate"], ["advanced"]],
-                "one_time_keyboard": True,
-                "resize_keyboard": True,
-            }
-            send_telegram_message(
-                bot_token,
-                chat_id,
-                f"**Current difficulty level:** {current_level.capitalize()}\n\nChoose your desired difficulty:",
-                reply_markup=difficulty_keyboard,
-            )
-            update_firestore_state(
-                {"interaction_state": "awaiting_difficulty_choice"},
-                user_doc_id=user_doc_id,
-            )
-            return "OK", 200
-
-        current_state = get_firestore_state(user_doc_id=user_doc_id)
-        interaction_state = current_state.get("interaction_state", "idle")
+        # Difficulty selection
         if interaction_state == "awaiting_difficulty_choice":
             if message_text.lower() in ["beginner", "intermediate", "advanced"]:
                 update_firestore_state(
@@ -305,7 +335,8 @@ Happy learning! 🚀
                 )
             return "OK", 200
 
-        elif message_text.lower() == "/admin" and is_admin_user(chat_id):
+        # Admin commands
+        if message_text.lower() == "/admin" and is_admin_user(chat_id):
             admin_message = """
 🔧 **Admin Commands**:
 • `/adduser <chat_id>` - Add new user
@@ -317,7 +348,7 @@ Happy learning! 🚀
             send_telegram_message(bot_token, chat_id, admin_message)
             return "OK", 200
 
-        elif message_text.lower().startswith("/adduser ") and is_admin_user(chat_id):
+        if message_text.lower().startswith("/adduser ") and is_admin_user(chat_id):
             try:
                 new_chat_id = message_text.split()[1]
                 if add_user_to_whitelist(new_chat_id):
@@ -330,7 +361,7 @@ Happy learning! 🚀
                 send_user_error(bot_token, chat_id, "❌ Usage: /adduser <chat_id>")
             return "OK", 200
 
-        elif message_text.lower().startswith("/removeuser ") and is_admin_user(chat_id):
+        if message_text.lower().startswith("/removeuser ") and is_admin_user(chat_id):
             try:
                 user_to_remove = message_text.split()[1]
                 if remove_user_from_whitelist(user_to_remove):
@@ -345,7 +376,7 @@ Happy learning! 🚀
                 send_user_error(bot_token, chat_id, "❌ Usage: /removeuser <chat_id>")
             return "OK", 200
 
-        elif message_text.lower() == "/listusers" and is_admin_user(chat_id):
+        if message_text.lower() == "/listusers" and is_admin_user(chat_id):
             users = get_authorized_users()
             if users:
                 user_list = "\n".join([f"• {user}" for user in users])
@@ -360,7 +391,7 @@ Happy learning! 🚀
                 )
             return "OK", 200
 
-        elif message_text.lower() == "/stats" and is_admin_user(chat_id):
+        if message_text.lower() == "/stats" and is_admin_user(chat_id):
             stats = get_system_statistics()
             stats_message = f"""
 📊 **System Statistics**:
@@ -372,6 +403,7 @@ Happy learning! 🚀
             send_telegram_message(bot_token, chat_id, stats_message)
             return "OK", 200
 
+        # Main interaction state machine
         current_state = get_firestore_state(user_doc_id=user_doc_id)
         interaction_state = current_state.get("interaction_state", "idle")
         if interaction_state == "awaiting_choice":
