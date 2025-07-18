@@ -1227,3 +1227,42 @@ def youtube_search(query, api_key, max_results=1):
         video_id = items[0]["id"]["videoId"]
         return f"https://www.youtube.com/watch?v={video_id}"
     return None
+
+
+def get_system_statistics() -> dict:
+    """Compute system statistics for admin /stats command."""
+    stats = {
+        "total_users": 0,
+        "active_users_today": 0,
+        "total_tasks_completed": 0,
+        "average_accuracy": 0.0,
+    }
+    try:
+        authorized_users = get_authorized_users()
+        stats["total_users"] = len(authorized_users)
+        total_accuracy = 0.0
+        total_tasks = 0
+        active_users = 0
+        for user_id in authorized_users:
+            proficiency_data = get_user_proficiency(user_id)
+            if proficiency_data:
+                user_tasks = 0
+                user_correct = 0
+                for category, items in proficiency_data.items():
+                    for item_name, item_stats in items.items():
+                        user_tasks += item_stats.get("attempts", 0)
+                        user_correct += item_stats.get("correct", 0)
+                total_tasks += user_tasks
+                if user_tasks > 0:
+                    total_accuracy += user_correct / user_tasks
+                    active_users += 1
+        stats["active_users_today"] = active_users
+        stats["total_tasks_completed"] = total_tasks
+        stats["average_accuracy"] = (
+            (total_accuracy / active_users * 100) if active_users > 0 else 0.0
+        )
+        logger.info(f"System statistics calculated: {stats}")
+        return stats
+    except Exception as e:
+        logger.error(f"Error calculating system statistics: {e}", exc_info=True)
+        return stats
