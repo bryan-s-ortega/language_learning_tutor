@@ -105,5 +105,3 @@ This project implements a sophisticated language learning system that:
 - **Voice recording analysis**: Practice pronunciation with voice analysis
 - **Vocabulary**: Learn 5 words and use them in sentences (difficulty affects word level)
 - **Writing**: Answer a thoughtful, open-ended question
-- **Listening**: Watch a YouTube scene and answer a comprehension question (difficulty affects scene and question complexity for English learners)
-- **Describing**: Describe an image or YouTube video in detail (difficulty affects expected detail and complexity for English learners)
