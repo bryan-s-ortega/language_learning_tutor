@@ -38,10 +38,10 @@ This project implements a sophisticated language learning system that:
   - Phrasal verb practice
   - Word fluency
   - Voice recording analysis
-  - Vocabulary (5 advanced words)
-  - Writing (thoughtful question)
-  - Listening (YouTube scene)
-  - Describing (image or video)
+  - Vocabulary
+  - Writing
+  - Listening
+  - Describing
 - **Difficulty Setting**: Users can set their English learner level (beginner, intermediate, advanced) with `/difficulty`. Vocabulary, describing, and listening tasks adapt to this setting.
 - **Real-time Feedback**: Instant AI-powered evaluation and personalized feedback
 - **Voice Support**: Speech-to-text transcription and pronunciation analysis
@@ -103,7 +103,7 @@ This project implements a sophisticated language learning system that:
 - **Phrasal verb practice**: Learn and practice English phrasal verbs
 - **Word fluency**: Generate words starting with specific letters
 - **Voice recording analysis**: Practice pronunciation with voice analysis
-- **Vocabulary (5 advanced words)**: Learn 5 words and use them in sentences (difficulty affects word level)
-- **Writing (thoughtful question)**: Answer a thoughtful, open-ended question
-- **Listening (YouTube scene)**: Watch a YouTube scene and answer a comprehension question (difficulty affects scene and question complexity for English learners)
-- **Describing (image or video)**: Describe an image or YouTube video in detail (difficulty affects expected detail and complexity for English learners)
+- **Vocabulary**: Learn 5 words and use them in sentences (difficulty affects word level)
+- **Writing**: Answer a thoughtful, open-ended question
+- **Listening**: Watch a YouTube scene and answer a comprehension question (difficulty affects scene and question complexity for English learners)
+- **Describing**: Describe an image or YouTube video in detail (difficulty affects expected detail and complexity for English learners)

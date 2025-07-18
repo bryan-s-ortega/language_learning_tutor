@@ -580,7 +580,7 @@ def generate_task(gemini_key, task_type, user_doc_id, topic=None):
             "The question should be relevant to daily life, culture, or personal growth. "
             "Make it clear that the user should write as much as possible."
         )
-    elif task_type == "Listening (YouTube scene)":
+    elif task_type == "Listening":
         prompt = prompt_base + (
             instruction_prefix
             + f"Suggest a search query for a specific scene from a TV show or movie on YouTube, suitable for a {difficulty_level} English learner. "
@@ -615,7 +615,7 @@ def generate_task(gemini_key, task_type, user_doc_id, topic=None):
                 "Sorry, I couldn't generate a search query for this task. Please try again."
             )
             return task_details_dict
-    elif task_type == "Describing (image or video)":
+    elif task_type == "Describing":
         prompt = prompt_base + (
             instruction_prefix
             + f"Generate a random, unique image suitable for a {difficulty_level} English learner. Do NOT describe the image yourself. Only ask the user to describe the generated image in as much detail as possible, in their own words."
@@ -739,10 +739,10 @@ def generate_task(gemini_key, task_type, user_doc_id, topic=None):
 
                 # --- Link validation for Listening/Describing ---
                 if task_type in [
-                    "Listening (YouTube scene)",
-                    "Describing (image or video)",
+                    "Listening",
+                    "Describing",
                 ]:
-                    if task_type == "Listening (YouTube scene)":
+                    if task_type == "Listening":
                         url = extract_first_url(
                             task_details_dict["description"], youtube_only=True
                         )
@@ -756,7 +756,7 @@ def generate_task(gemini_key, task_type, user_doc_id, topic=None):
                                 task_details_dict["description"] = (
                                     "Sorry, I couldn't find a valid YouTube video for this task. Please try again."
                                 )
-                    elif task_type == "Describing (image or video)":
+                    elif task_type == "Describing":
                         url = extract_first_url(task_details_dict["description"])
                         if (
                             not url

@@ -63,10 +63,10 @@ class TaskConfig:
                 "Phrasal verb",
                 "Word starting with letter",
                 "Voice Recording Analysis",
-                "Vocabulary (5 advanced words)",
-                "Writing (thoughtful question)",
-                "Listening (YouTube scene)",
-                "Describing (image or video)",
+                "Vocabulary",
+                "Writing",
+                "Listening",
+                "Describing",
             ]
 
 

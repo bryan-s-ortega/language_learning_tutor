@@ -135,10 +135,10 @@ I'm your AI-powered English learning assistant. Here's how to get started:
 • Phrasal verb practice
 • Word fluency exercises
 • Voice recording analysis
-• Vocabulary (5 advanced words)
-• Writing (thoughtful question)
-• Listening (YouTube scene)
-• Describing (image or video)
+• Vocabulary
+• Writing
+• Listening
+• Describing
 
 Ready to start learning? Send `/newtask` to begin!
 """
@@ -282,10 +282,10 @@ Thank you for your interest!
 • **Phrasal verb practice** - Learn and practice English phrasal verbs
 • **Word fluency** - Generate words starting with specific letters
 • **Voice recording** - Practice pronunciation with voice analysis
-• **Vocabulary (5 advanced words)** - Learn 5 advanced but common English words and use them in sentences
-• **Writing (thoughtful question)** - Answer a thoughtful, open-ended question with an extensive written response
-• **Listening (YouTube scene)** - Watch a short YouTube scene and answer a comprehension question
-• **Describing (image or video)** - Describe an image or YouTube video in detail
+• **Vocabulary** - Learn 5 advanced but common English words and use them in sentences
+• **Writing** - Answer a thoughtful, open-ended question with an extensive written response
+• **Listening** - Watch a short YouTube scene and answer a comprehension question
+• **Describing** - Describe an image or YouTube video in detail
 
 **How it works:**
 1. Send `/newtask` to start
