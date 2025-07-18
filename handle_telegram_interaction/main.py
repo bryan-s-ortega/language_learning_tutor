@@ -4,7 +4,6 @@ from datetime import datetime
 import sys
 import os
 
-# Add the parent directory to the path to import config
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import config
@@ -30,7 +29,6 @@ from utils import (
     logger,
 )
 
-# At the top of your file, after imports and config
 _bot_token = None
 _gemini_key = None
 
@@ -49,9 +47,17 @@ def get_gemini_key():
     return _gemini_key
 
 
+def send_user_error(bot_token, chat_id, message):
+    try:
+        send_telegram_message(bot_token, chat_id, message)
+    except Exception as e:
+        logger.error(
+            f"Failed to send error message to user {chat_id}: {e}", exc_info=True
+        )
+
+
 @functions_framework.http
 def handle_telegram_interaction(request):
-    # Generate a unique request ID for tracking
     import uuid
 
     request_id = str(uuid.uuid4())[:8]
@@ -66,58 +72,42 @@ def handle_telegram_interaction(request):
     chat_id = None
 
     try:
-        logger.info("Webhook secrets retrieved.")
-
-        logger.debug(f"[{request_id}] Attempting to parse JSON body...")
         req_body = request.get_json(silent=True)
-        logger.debug(f"[{request_id}] JSON body parsed. Type: {type(req_body)}")
         if not req_body:
             logger.error(f"[{request_id}] Error: Invalid or empty JSON body received.")
             return "Bad Request", 400
 
         message = req_body.get("message")
         if not message:
-            logger.info(
-                f"[{request_id}] No 'message' key found in webhook body. Acknowledging."
-            )
             return "OK", 200
 
         chat_id_from_message = message.get("chat", {}).get("id")
         if not chat_id_from_message:
-            logger.warning(
-                f"[{request_id}] No chat_id found in message. Acknowledging."
-            )
             return "OK", 200
 
         chat_id = chat_id_from_message
         user_doc_id = str(chat_id)
-        logger.info(f"[{request_id}] Processing message from chat_id: {chat_id}")
-
-        # Fetch user state early to check for blocked state
         current_state = get_firestore_state(user_doc_id=user_doc_id)
         interaction_state = current_state.get("interaction_state", "idle")
-        # Blocked state check
-        if interaction_state == "blocked_due_to_error":
-            if message.get("text", "").strip().lower() in ["/start", "/newtask"]:
-                # Allow reset
-                pass
-            else:
-                send_telegram_message(
-                    bot_token,
-                    chat_id,
-                    "⚠️ The bot is temporarily unavailable due to a system error or quota issue. Please use /start or /newtask to reset.",
-                )
-                return "OK", 200
 
         message_text = message.get("text", "").strip()
         voice = message.get("voice")
         transcribed_text = None
 
-        # Handle /start command specifically BEFORE auth check
+        # Blocked state check
+        if interaction_state == "blocked_due_to_error" and message_text.lower() not in [
+            "/start",
+            "/newtask",
+        ]:
+            send_user_error(
+                bot_token,
+                chat_id,
+                "⚠️ The bot is temporarily unavailable due to a system error or quota issue. Please use /start or /newtask to reset.",
+            )
+            return "OK", 200
+
         if message_text.lower() == "/start":
-            logger.info(f"/start command received from user {user_doc_id}")
             if is_user_authorized(chat_id):
-                # Authorized user - send welcome message
                 welcome_message = """
 🎓 **Welcome to the Language Learning Tutor!**
 
@@ -144,7 +134,6 @@ Ready to start learning? Send `/newtask` to begin!
 """
                 send_telegram_message(bot_token, chat_id, welcome_message)
             else:
-                # Unauthorized user - send one-time access request message
                 access_message = f"""
 🚫 **Access Required**
 
@@ -160,26 +149,16 @@ Thank you for your interest!
                 send_telegram_message(bot_token, chat_id, access_message)
             return "OK", 200
 
-        # Multi-user authentication
         if not is_user_authorized(chat_id):
-            logger.warning(
-                f"[{request_id}] Unauthorized attempt from chat_id: {chat_id}"
-            )
-            send_telegram_message(
+            send_user_error(
                 bot_token,
                 chat_id,
-                "🚫 **Access Denied**: You are not authorized to use this bot. "
-                "Please contact the administrator to get access.",
-            )
-            logger.info(
-                f"[{request_id}] Sent access denied message to unauthorized user {chat_id}"
+                "🚫 **Access Denied**: You are not authorized to use this bot. Please contact the administrator to get access.",
             )
             return "Forbidden", 403
 
-        # Rate limiting (skip for admin commands)
         if not is_admin_user(chat_id) and not check_rate_limit(user_doc_id):
-            logger.warning(f"Rate limit exceeded for user: {chat_id}")
-            send_telegram_message(
+            send_user_error(
                 bot_token,
                 chat_id,
                 "⏰ **Rate Limit Exceeded**: Please wait a few minutes before making more requests.",
@@ -187,50 +166,28 @@ Thank you for your interest!
             return "Too Many Requests", 429
 
         if voice:
-            logger.debug("Entered voice processing block.")
             file_id = voice.get("file_id")
             if file_id:
-                logger.debug(f"Got file_id {file_id}. Calling transcribe_voice...")
                 try:
                     transcribed_text = transcribe_voice(bot_token, file_id, gemini_key)
                 except Exception as E:
                     logger.error(
-                        f"ERROR: Exception occurred *during* transcribe_voice call: {E}",
-                        exc_info=True,
+                        f"ERROR: Exception during transcribe_voice: {E}", exc_info=True
                     )
                     transcribed_text = None
-
-                logger.debug(
-                    f"Returned from transcribe_voice. Result type: {type(transcribed_text)}, Value: '{transcribed_text}'"
-                )
                 if transcribed_text:
-                    logger.debug(
-                        f"Transcription succeeded. Using text: '{transcribed_text}'"
-                    )
                     message_text = transcribed_text
                 else:
-                    logger.warning(
-                        "Transcription failed or returned empty. Informing user."
-                    )
-                    send_telegram_message(
+                    send_user_error(
                         bot_token,
                         chat_id,
                         "Sorry, I couldn't understand the voice message. Please try typing.",
                     )
                     return "OK", 200
-            else:
-                logger.warning("Voice message present but no file_id found.")
-        else:
-            logger.debug("No voice message detected in this payload.")
-
         if message_text is None:
             message_text = ""
-        logger.debug(
-            f"Effective message_text before command/state check: '{message_text}'"
-        )
 
         if message_text.lower() == "/newtask":
-            logger.info(f"/newtask command received from user {user_doc_id}")
             reset_state_data = {
                 "interaction_state": "awaiting_choice",
                 "chosen_task_type": None,
@@ -240,24 +197,17 @@ Thank you for your interest!
                 reset_state_data, user_doc_id=user_doc_id
             )
             if update_success:
-                logger.info(
-                    "State reset successfully for /newtask. Now sending new choice request message."
-                )
                 send_success = send_choice_request_message(
                     bot_token, chat_id, user_doc_id
                 )
                 if not send_success:
-                    logger.error(
-                        "Failed to send choice request message after /newtask state reset."
-                    )
-                    send_telegram_message(
+                    send_user_error(
                         bot_token,
                         chat_id,
                         "State reset, but I had trouble sending the new task options. Please try /newtask again later or wait for the daily prompt.",
                     )
             else:
-                logger.error("Failed to reset state for /newtask.")
-                send_telegram_message(
+                send_user_error(
                     bot_token,
                     chat_id,
                     "Sorry, there was an issue resetting for a new task. Please try /newtask again.",
@@ -265,7 +215,6 @@ Thank you for your interest!
             return "OK", 200
 
         elif message_text.lower() == "/help":
-            logger.info(f"/help command received from user {user_doc_id}")
             help_message = """
 🎓 **Language Learning Tutor - Help**
 
@@ -300,7 +249,6 @@ Happy learning! 🚀
             return "OK", 200
 
         elif message_text.lower() == "/progress":
-            logger.info(f"/progress command received from user {user_doc_id}")
             proficiency_data = get_user_proficiency(user_doc_id)
             if proficiency_data:
                 progress_message = generate_progress_report(proficiency_data)
@@ -314,8 +262,6 @@ Happy learning! 🚀
             return "OK", 200
 
         elif message_text.lower() == "/difficulty":
-            logger.info(f"/difficulty command received from user {user_doc_id}")
-            current_state = get_firestore_state(user_doc_id=user_doc_id)
             current_level = current_state.get("difficulty_level", "advanced")
             difficulty_keyboard = {
                 "keyboard": [["beginner"], ["intermediate"], ["advanced"]],
@@ -328,14 +274,12 @@ Happy learning! 🚀
                 f"**Current difficulty level:** {current_level.capitalize()}\n\nChoose your desired difficulty:",
                 reply_markup=difficulty_keyboard,
             )
-            # Set a state so we know to update on next message
             update_firestore_state(
                 {"interaction_state": "awaiting_difficulty_choice"},
                 user_doc_id=user_doc_id,
             )
             return "OK", 200
 
-        # Handle difficulty selection
         current_state = get_firestore_state(user_doc_id=user_doc_id)
         interaction_state = current_state.get("interaction_state", "idle")
         if interaction_state == "awaiting_difficulty_choice":
@@ -354,14 +298,13 @@ Happy learning! 🚀
                     reply_markup={"remove_keyboard": True},
                 )
             else:
-                send_telegram_message(
+                send_user_error(
                     bot_token,
                     chat_id,
                     "Please choose a valid difficulty: beginner, intermediate, or advanced.",
                 )
             return "OK", 200
 
-        # Admin commands
         elif message_text.lower() == "/admin" and is_admin_user(chat_id):
             admin_message = """
 🔧 **Admin Commands**:
@@ -382,11 +325,9 @@ Happy learning! 🚀
                         bot_token, chat_id, f"✅ User {new_chat_id} added successfully!"
                     )
                 else:
-                    send_telegram_message(bot_token, chat_id, "❌ Failed to add user")
+                    send_user_error(bot_token, chat_id, "❌ Failed to add user")
             except IndexError:
-                send_telegram_message(
-                    bot_token, chat_id, "❌ Usage: /adduser <chat_id>"
-                )
+                send_user_error(bot_token, chat_id, "❌ Usage: /adduser <chat_id>")
             return "OK", 200
 
         elif message_text.lower().startswith("/removeuser ") and is_admin_user(chat_id):
@@ -399,13 +340,9 @@ Happy learning! 🚀
                         f"✅ User {user_to_remove} removed successfully!",
                     )
                 else:
-                    send_telegram_message(
-                        bot_token, chat_id, "❌ Failed to remove user"
-                    )
+                    send_user_error(bot_token, chat_id, "❌ Failed to remove user")
             except IndexError:
-                send_telegram_message(
-                    bot_token, chat_id, "❌ Usage: /removeuser <chat_id>"
-                )
+                send_user_error(bot_token, chat_id, "❌ Usage: /removeuser <chat_id>")
             return "OK", 200
 
         elif message_text.lower() == "/listusers" and is_admin_user(chat_id):
@@ -437,12 +374,9 @@ Happy learning! 🚀
 
         current_state = get_firestore_state(user_doc_id=user_doc_id)
         interaction_state = current_state.get("interaction_state", "idle")
-        logger.info(f"Current interaction state for {user_doc_id}: {interaction_state}")
-
         if interaction_state == "awaiting_choice":
             chosen_task_type = message_text
             if chosen_task_type in config.tasks.task_types:
-                logger.info(f"User chose task type: {chosen_task_type}")
                 task_details = generate_task(gemini_key, chosen_task_type, user_doc_id)
                 if task_details and task_details.get("description"):
                     new_state_data = {
@@ -459,22 +393,17 @@ Happy learning! 🚀
                         reply_markup={"remove_keyboard": True},
                     )
                 else:
-                    logger.error(
-                        f"Task generation failed or no description for type {chosen_task_type}. Task details: {task_details}"
-                    )
-                    send_telegram_message(
+                    send_user_error(
                         bot_token,
                         chat_id,
                         f"Sorry, I couldn't generate a '{chosen_task_type}' task. Try another or /newtask.",
-                        reply_markup={"remove_keyboard": True},
                     )
                     update_firestore_state(
                         {"interaction_state": "awaiting_choice"},
                         user_doc_id=user_doc_id,
                     )
             else:
-                logger.warning(f"Invalid task choice: {chosen_task_type}")
-                send_telegram_message(
+                send_user_error(
                     bot_token,
                     chat_id,
                     "Hmm, that doesn't look like one of the options. Please choose a task type from the list I sent.",
@@ -483,8 +412,7 @@ Happy learning! 🚀
         elif interaction_state == "awaiting_answer":
             task_details = current_state.get("current_task_details")
             if not task_details:
-                logger.error("Awaiting answer but no task_details found in state.")
-                send_telegram_message(
+                send_user_error(
                     bot_token,
                     chat_id,
                     "Sorry, I lost track of the current task. Please wait for the next prompt or use /newtask.",
@@ -504,9 +432,6 @@ Happy learning! 🚀
 
             if task_type == "Voice Recording Analysis":
                 if voice:
-                    logger.debug(
-                        "Voice answer received for Voice Recording Analysis task."
-                    )
                     file_id = voice.get("file_id")
                     if file_id:
                         audio_bytes_for_eval = None
@@ -522,9 +447,6 @@ Happy learning! 🚀
                                 res_audio = requests.get(file_download_url, timeout=20)
                                 res_audio.raise_for_status()
                                 audio_bytes_for_eval = res_audio.content
-                                logger.debug(
-                                    f"Downloaded audio for analysis, size: {len(audio_bytes_for_eval)} bytes"
-                                )
                             else:
                                 logger.error(
                                     "Could not get file_path from Telegram for voice analysis."
@@ -534,7 +456,6 @@ Happy learning! 🚀
                                 f"Failed to download voice for analysis: {dl_err}",
                                 exc_info=True,
                             )
-
                         if audio_bytes_for_eval:
                             evaluation_result = evaluate_answer(
                                 gemini_key,
@@ -557,9 +478,6 @@ Happy learning! 🚀
                     feedback_text_to_send = "I didn't receive any text or understandable voice for your answer. Please try again."
                     is_correct_for_proficiency = False
                 else:
-                    logger.debug(
-                        f"Received text answer/follow-up: {user_answer_text_for_eval} for task type {task_type}"
-                    )
                     evaluation_result = evaluate_answer(
                         gemini_key,
                         task_details,
@@ -581,9 +499,7 @@ Happy learning! 🚀
             items_to_update = []
 
             if task_type == "Idiom" and specific_item_tested:
-                item_type_for_proficiency = (
-                    "phrasal_verbs"  # Or use 'idioms' if you want to track separately
-                )
+                item_type_for_proficiency = "phrasal_verbs"
                 items_to_update.append(specific_item_tested)
             elif task_type == "Phrasal verb" and specific_item_tested:
                 item_type_for_proficiency = "phrasal_verbs"
@@ -596,7 +512,6 @@ Happy learning! 🚀
             ):
                 item_type_for_proficiency = "vocabulary_words"
                 items_to_update.extend(specific_item_tested)
-            # For new tasks, only update proficiency if a specific item and type are defined
             if (
                 item_type_for_proficiency
                 and items_to_update
@@ -610,20 +525,9 @@ Happy learning! 🚀
                         is_correct_for_proficiency,
                         task_id,
                     )
-            else:
-                logger.info(
-                    f"No specific item, item type, or valid correctness determined for proficiency update. Task type: {task_type}, Correctness: {is_correct_for_proficiency}"
-                )
-
-            logger.info(
-                f"Feedback sent. State remains 'awaiting_answer' for user {user_doc_id}."
-            )
 
         else:
-            logger.info(
-                f"Message received in state: {interaction_state}. Defaulting to help/wait message."
-            )
-            send_telegram_message(
+            send_user_error(
                 bot_token,
                 chat_id,
                 "I'm waiting for the next daily prompt to select a task type. You can use `/newtask` to reset if needed.",
@@ -639,11 +543,14 @@ Happy learning! 🚀
                     {"interaction_state": "blocked_due_to_error"},
                     user_doc_id=user_doc_id,
                 )
-                send_telegram_message(
+                send_user_error(
                     bot_token,
                     chat_id,
                     f"Debug: A critical error occurred in the webhook: {str(e)[:100]}\nThe bot is now paused. Please use /start or /newtask to reset.",
                 )
             except Exception:
-                pass
+                logger.error(
+                    "Failed to update state or notify user after fatal error.",
+                    exc_info=True,
+                )
         return "Internal Server Error", 500
