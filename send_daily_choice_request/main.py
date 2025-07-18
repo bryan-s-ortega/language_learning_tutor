@@ -1,9 +1,5 @@
 import functions_framework
-import sys
-import os
 import logging
-
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import config
 from utils import (
