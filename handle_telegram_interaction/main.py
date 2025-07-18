@@ -30,6 +30,24 @@ from utils import (
     logger,
 )
 
+# At the top of your file, after imports and config
+_bot_token = None
+_gemini_key = None
+
+
+def get_bot_token():
+    global _bot_token
+    if _bot_token is None:
+        _bot_token = access_secret_version(config.secrets.telegram_token_secret_id)
+    return _bot_token
+
+
+def get_gemini_key():
+    global _gemini_key
+    if _gemini_key is None:
+        _gemini_key = access_secret_version(config.secrets.gemini_api_key_secret_id)
+    return _gemini_key
+
 
 @functions_framework.http
 def handle_telegram_interaction(request):
@@ -43,13 +61,11 @@ def handle_telegram_interaction(request):
         logger.warning(f"[{request_id}] Received non-POST request: {request.method}")
         return "Only POST requests are accepted", 405
 
-    bot_token = None
-    gemini_key = None
+    bot_token = get_bot_token()
+    gemini_key = get_gemini_key()
     chat_id = None
 
     try:
-        bot_token = access_secret_version(config.secrets.telegram_token_secret_id)
-        gemini_key = access_secret_version(config.secrets.gemini_api_key_secret_id)
         logger.info("Webhook secrets retrieved.")
 
         logger.debug(f"[{request_id}] Attempting to parse JSON body...")
