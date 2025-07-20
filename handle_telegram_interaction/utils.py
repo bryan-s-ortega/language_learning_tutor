@@ -393,9 +393,15 @@ def generate_task(gemini_key, task_type, user_doc_id, topic=None):
             instruction_prefix
             + f"Provide 3 related English vocabulary words suitable for a {difficulty_level} learner. "
             "For each word, on a NEW line, identify it like 'ITEM: [word]'. "
-            "After listing all ITEMs, provide their definitions. "
-            "The definitions should be presented in a jumbled or randomized order. "
-            "Make it clear they need to match them (e.g., 'Match the words with their definitions below.')."
+            "After listing all ITEMs, provide their definitions labeled as A, B, C in jumbled order. "
+            "Make it clear they need to match them by writing the word number and letter (e.g., '1-A, 2-B, 3-C'). "
+            "Example format:\n"
+            "ITEM: word1\n"
+            "ITEM: word2\n"
+            "ITEM: word3\n\n"
+            "A. definition for word2\n"
+            "B. definition for word1\n"
+            "C. definition for word3"
         )
     elif task_type == "Idiom":
         prompt = prompt_base + (
@@ -493,13 +499,14 @@ def generate_task(gemini_key, task_type, user_doc_id, topic=None):
                         other_lines_for_description.append(line)
                 if task_type == "Vocabulary matching":
                     if items_found:
-                        user_description = "Match the following words with their definitions:\n\n**Words to match:**\n"
+                        user_description = "**Vocabulary Matching Task**\n\nMatch the following words with their definitions:\n\n**Words:**\n"
                         for i, word in enumerate(items_found):
                             user_description += f"{i + 1}. {word}\n"
                         user_description += "\n**Definitions:**\n"
                         user_description += "\n".join(
                             other_lines_for_description
                         ).strip()
+                        user_description += "\n\n**How to answer:** Write your matches in the format '1-A, 2-B, 3-C' where the number is the word and the letter is the definition."
                         task_details_dict["description"] = user_description
                         task_details_dict["specific_item_tested"] = items_found
                     else:
@@ -627,14 +634,28 @@ def evaluate_answer(
             }
     else:
         if user_answer_text:
-            prompt_parts.append(
-                f"The user responded with text:\n--- USER RESPONSE START ---\n{user_answer_text}\n--- USER RESPONSE END ---"
-            )
-            prompt_parts.append(
-                "Please evaluate the user's text response based ONLY on the given task. "
-                "Be concise and clear. If correct, acknowledge it positively. "
-                "If incorrect, gently point out the error and provide the correction or a hint."
-            )
+            # Task-specific evaluation prompts
+            if task_type == "Vocabulary matching":
+                prompt_parts.append(
+                    f"The user responded with text:\n--- USER RESPONSE START ---\n{user_answer_text}\n--- USER RESPONSE END ---"
+                )
+                prompt_parts.append(
+                    "This is a VOCABULARY MATCHING task. The user should match words with their definitions. "
+                    "Evaluate their response by checking if they correctly matched each word with its definition. "
+                    "Look for patterns like '1-A', '2-B', 'word-definition', or similar matching formats. "
+                    "If they provided the correct matches, acknowledge their success. "
+                    "If they made errors, point out which matches were incorrect and provide the correct answers. "
+                    "Be encouraging and educational in your feedback."
+                )
+            else:
+                prompt_parts.append(
+                    f"The user responded with text:\n--- USER RESPONSE START ---\n{user_answer_text}\n--- USER RESPONSE END ---"
+                )
+                prompt_parts.append(
+                    "Please evaluate the user's text response based ONLY on the given task. "
+                    "Be concise and clear. If correct, acknowledge it positively. "
+                    "If incorrect, gently point out the error and provide the correction or a hint."
+                )
         else:
             logger.error("Expected text answer, but none provided.")
             return {
