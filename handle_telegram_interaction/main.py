@@ -1,12 +1,7 @@
 import functions_framework
 import requests
 from datetime import datetime
-import sys
-import os
 from typing import Any, Dict
-
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from config import config
 from utils import (
     access_secret_version,
@@ -60,6 +55,9 @@ def send_user_error(bot_token: str, chat_id: str, message: str) -> None:
 # --- Command Handlers ---
 def handle_start(bot_token: str, chat_id: str, user_doc_id: str, **kwargs) -> str:
     if is_user_authorized(chat_id):
+        # Check if user is admin to show admin commands
+        is_admin = is_admin_user(chat_id)
+
         welcome_message = """
 🎓 **Welcome to the Language Learning Tutor!**
 
@@ -68,7 +66,21 @@ I'm your AI-powered English learning assistant. Here's how to get started:
 **Available Commands:**
 • `/newtask` - Start a new learning task
 • `/progress` - View your learning progress
-• `/help` - Show this help message
+• `/help` - Show this help message"""
+
+        # Add admin commands section only for admins
+        if is_admin:
+            welcome_message += """
+
+**Admin Commands:**
+• `/admin` - Show admin help
+• `/adduser <chat_id>` - Add new user
+• `/removeuser <chat_id>` - Remove user
+• `/listusers` - List all users
+• `/stats` - System statistics
+• `/debugauth` - Debug authorization cache"""
+
+        welcome_message += """
 
 **Task Types Available:**
 • Error correction
@@ -101,6 +113,9 @@ Thank you for your interest!
 
 
 def handle_help(bot_token: str, chat_id: str, **kwargs) -> str:
+    # Check if user is admin to show admin commands
+    is_admin = is_admin_user(chat_id)
+
     help_message = """
 🎓 **Language Learning Tutor - Help**
 
@@ -108,7 +123,21 @@ def handle_help(bot_token: str, chat_id: str, **kwargs) -> str:
 • `/start` - Welcome message and bot introduction
 • `/newtask` - Start a new learning task
 • `/progress` - View your learning progress
-• `/help` - Show this help message
+• `/help` - Show this help message"""
+
+    # Add admin commands section only for admins
+    if is_admin:
+        help_message += """
+
+**Admin Commands:**
+• `/admin` - Show admin help
+• `/adduser <chat_id>` - Add new user
+• `/removeuser <chat_id>` - Remove user
+• `/listusers` - List all users
+• `/stats` - System statistics
+• `/debugauth` - Debug authorization cache"""
+
+    help_message += """
 
 **Task Types:**
 • **Error correction** - Fix grammatical errors in sentences
@@ -189,63 +218,35 @@ def handle_telegram_interaction(request) -> Any:
     gemini_key = get_gemini_key()
     chat_id = None
 
-    try:
-        req_body = request.get_json(silent=True)
-        if not req_body:
-            logger.error(f"[{request_id}] Error: Invalid or empty JSON body received.")
-            return "Bad Request", 400
+    req_body = request.get_json(silent=True)
+    if not req_body:
+        logger.error(f"[{request_id}] Error: Invalid or empty JSON body received.")
+        return "Bad Request", 400
 
-        message = req_body.get("message")
-        if not message:
-            return "OK", 200
+    message = req_body.get("message")
+    if not message:
+        return "OK", 200
 
-        chat_id_from_message = message.get("chat", {}).get("id")
-        if not chat_id_from_message:
-            return "OK", 200
+    chat_id_from_message = message.get("chat", {}).get("id")
+    if not chat_id_from_message:
+        return "OK", 200
 
-        chat_id = chat_id_from_message
-        user_doc_id = str(chat_id)
-        current_state = get_firestore_state(user_doc_id=user_doc_id)
-        interaction_state = current_state.get("interaction_state", "idle")
+    chat_id = chat_id_from_message
+    user_doc_id = str(chat_id)
+    current_state = get_firestore_state(user_doc_id=user_doc_id)
+    interaction_state = current_state.get("interaction_state", "idle")
 
-        message_text = message.get("text", "").strip()
-        voice = message.get("voice")
-        transcribed_text = None
+    message_text = message.get("text", "").strip()
+    voice = message.get("voice")
+    transcribed_text = None
 
-        # Blocked state check
-        if interaction_state == "blocked_due_to_error" and message_text.lower() not in [
-            "/start",
-            "/newtask",
-        ]:
-            send_user_error(
-                bot_token,
-                chat_id,
-                "⚠️ The bot is temporarily unavailable due to a system error or quota issue. Please use /start or /newtask to reset.",
-            )
-            return "OK", 200
-
-        # Command dispatch dictionary
-        command_handlers = {
-            "/start": handle_start,
-            "/help": handle_help,
-            "/progress": handle_progress,
-            "/difficulty": handle_difficulty,
-        }
-
-        # Handle commands
-        if message_text.lower() in command_handlers:
-            handler = command_handlers[message_text.lower()]
-            if message_text.lower() == "/difficulty":
-                return handler(
-                    bot_token, chat_id, user_doc_id, current_state=current_state
-                )
-            elif message_text.lower() in ["/start", "/progress"]:
-                return handler(bot_token, chat_id, user_doc_id)
-            else:
-                return handler(bot_token, chat_id)
-
-        # Multi-user authentication
-        if not is_user_authorized(chat_id):
+    # Multi-user authentication (check before processing any commands except /start)
+    if not is_user_authorized(chat_id):
+        # Only allow /start command for unauthorized users
+        if message_text.lower() == "/start":
+            return handle_start(bot_token, chat_id, user_doc_id)
+        else:
+            # Send single access denied message and return immediately
             send_user_error(
                 bot_token,
                 chat_id,
@@ -253,336 +254,386 @@ def handle_telegram_interaction(request) -> Any:
             )
             return "Forbidden", 403
 
-        if not is_admin_user(chat_id) and not check_rate_limit(user_doc_id):
+    # From this point on, only authorized users can proceed
+    # Command dispatch dictionary
+    command_handlers = {
+        "/start": handle_start,
+        "/help": handle_help,
+        "/progress": handle_progress,
+        "/difficulty": handle_difficulty,
+    }
+
+    # Handle commands
+    if message_text.lower() in command_handlers:
+        handler = command_handlers[message_text.lower()]
+        if message_text.lower() == "/difficulty":
+            return handler(bot_token, chat_id, user_doc_id, current_state=current_state)
+        elif message_text.lower() in ["/start", "/progress"]:
+            return handler(bot_token, chat_id, user_doc_id)
+        else:
+            return handler(bot_token, chat_id)
+
+    # Rate limiting check (only for authorized users)
+    if not is_admin_user(chat_id) and not check_rate_limit(user_doc_id):
+        send_user_error(
+            bot_token,
+            chat_id,
+            "⏰ **Rate Limit Exceeded**: Please wait a few minutes before making more requests.",
+        )
+        return "Too Many Requests", 429
+
+    if voice:
+        file_id = voice.get("file_id")
+        if file_id:
+            try:
+                transcribed_text = transcribe_voice(bot_token, file_id, gemini_key)
+            except Exception as E:
+                logger.error(
+                    f"ERROR: Exception during transcribe_voice: {E}", exc_info=True
+                )
+                transcribed_text = None
+            if transcribed_text:
+                message_text = transcribed_text
+            else:
+                send_user_error(
+                    bot_token,
+                    chat_id,
+                    "Sorry, I couldn't understand the voice message. Please try typing.",
+                )
+                return "OK", 200
+    if message_text is None:
+        message_text = ""
+
+    # New task command
+    if message_text.lower() == "/newtask":
+        reset_state_data = {
+            "interaction_state": "awaiting_choice",
+            "chosen_task_type": None,
+            "current_task_details": None,
+        }
+        update_success = update_firestore_state(
+            reset_state_data, user_doc_id=user_doc_id
+        )
+        if update_success:
+            send_success = send_choice_request_message(bot_token, chat_id, user_doc_id)
+            if not send_success:
+                send_user_error(
+                    bot_token,
+                    chat_id,
+                    "State reset, but I had trouble sending the new task options. Please try /newtask again later or wait for the daily prompt.",
+                )
+        else:
             send_user_error(
                 bot_token,
                 chat_id,
-                "⏰ **Rate Limit Exceeded**: Please wait a few minutes before making more requests.",
+                "Sorry, there was an issue resetting for a new task. Please try /newtask again.",
             )
-            return "Too Many Requests", 429
+        return "OK", 200
 
-        if voice:
-            file_id = voice.get("file_id")
-            if file_id:
-                try:
-                    transcribed_text = transcribe_voice(bot_token, file_id, gemini_key)
-                except Exception as E:
-                    logger.error(
-                        f"ERROR: Exception during transcribe_voice: {E}", exc_info=True
-                    )
-                    transcribed_text = None
-                if transcribed_text:
-                    message_text = transcribed_text
-                else:
-                    send_user_error(
-                        bot_token,
-                        chat_id,
-                        "Sorry, I couldn't understand the voice message. Please try typing.",
-                    )
-                    return "OK", 200
-        if message_text is None:
-            message_text = ""
-
-        # New task command
-        if message_text.lower() == "/newtask":
-            reset_state_data = {
-                "interaction_state": "awaiting_choice",
-                "chosen_task_type": None,
-                "current_task_details": None,
-            }
-            update_success = update_firestore_state(
-                reset_state_data, user_doc_id=user_doc_id
+    # Difficulty selection
+    if interaction_state == "awaiting_difficulty_choice":
+        if message_text.lower() in ["beginner", "intermediate", "advanced"]:
+            update_firestore_state(
+                {
+                    "difficulty_level": message_text.lower(),
+                    "interaction_state": "idle",
+                },
+                user_doc_id=user_doc_id,
             )
-            if update_success:
-                send_success = send_choice_request_message(
-                    bot_token, chat_id, user_doc_id
-                )
-                if not send_success:
-                    send_user_error(
-                        bot_token,
-                        chat_id,
-                        "State reset, but I had trouble sending the new task options. Please try /newtask again later or wait for the daily prompt.",
-                    )
-            else:
-                send_user_error(
-                    bot_token,
-                    chat_id,
-                    "Sorry, there was an issue resetting for a new task. Please try /newtask again.",
-                )
-            return "OK", 200
+            send_telegram_message(
+                bot_token,
+                chat_id,
+                f"✅ Difficulty level set to: {message_text.capitalize()}!",
+                reply_markup={"remove_keyboard": True},
+            )
+        else:
+            send_user_error(
+                bot_token,
+                chat_id,
+                "Please choose a valid difficulty: beginner, intermediate, or advanced.",
+            )
+        return "OK", 200
 
-        # Difficulty selection
-        if interaction_state == "awaiting_difficulty_choice":
-            if message_text.lower() in ["beginner", "intermediate", "advanced"]:
-                update_firestore_state(
-                    {
-                        "difficulty_level": message_text.lower(),
-                        "interaction_state": "idle",
-                    },
-                    user_doc_id=user_doc_id,
-                )
-                send_telegram_message(
-                    bot_token,
-                    chat_id,
-                    f"✅ Difficulty level set to: {message_text.capitalize()}!",
-                    reply_markup={"remove_keyboard": True},
-                )
-            else:
-                send_user_error(
-                    bot_token,
-                    chat_id,
-                    "Please choose a valid difficulty: beginner, intermediate, or advanced.",
-                )
-            return "OK", 200
-
-        # Admin commands
-        if message_text.lower() == "/admin" and is_admin_user(chat_id):
-            admin_message = """
+    # Admin commands
+    if message_text.lower() == "/admin" and is_admin_user(chat_id):
+        admin_message = """
 🔧 **Admin Commands**:
 • `/adduser <chat_id>` - Add new user
 • `/removeuser <chat_id>` - Remove user  
 • `/listusers` - List all users
 • `/stats` - System statistics
+• `/debugauth` - Debug authorization cache
 • `/help` - Show this help
 """
-            send_telegram_message(bot_token, chat_id, admin_message)
-            return "OK", 200
+        send_telegram_message(bot_token, chat_id, admin_message)
+        return "OK", 200
 
-        if message_text.lower().startswith("/adduser ") and is_admin_user(chat_id):
-            try:
-                new_chat_id = message_text.split()[1]
-                if add_user_to_whitelist(new_chat_id):
-                    send_telegram_message(
-                        bot_token, chat_id, f"✅ User {new_chat_id} added successfully!"
-                    )
-                else:
-                    send_user_error(bot_token, chat_id, "❌ Failed to add user")
-            except IndexError:
-                send_user_error(bot_token, chat_id, "❌ Usage: /adduser <chat_id>")
-            return "OK", 200
+    if message_text.lower().startswith("/adduser ") and is_admin_user(chat_id):
+        try:
+            new_chat_id = message_text.split()[1]
+            if add_user_to_whitelist(new_chat_id):
+                send_telegram_message(
+                    bot_token, chat_id, f"✅ User {new_chat_id} added successfully!"
+                )
+            else:
+                send_user_error(bot_token, chat_id, "❌ Failed to add user")
+        except IndexError:
+            send_user_error(bot_token, chat_id, "❌ Usage: /adduser <chat_id>")
+        return "OK", 200
 
-        if message_text.lower().startswith("/removeuser ") and is_admin_user(chat_id):
-            try:
-                user_to_remove = message_text.split()[1]
-                if remove_user_from_whitelist(user_to_remove):
-                    send_telegram_message(
-                        bot_token,
-                        chat_id,
-                        f"✅ User {user_to_remove} removed successfully!",
-                    )
-                else:
-                    send_user_error(bot_token, chat_id, "❌ Failed to remove user")
-            except IndexError:
-                send_user_error(bot_token, chat_id, "❌ Usage: /removeuser <chat_id>")
-            return "OK", 200
+    if message_text.lower().startswith("/removeuser ") and is_admin_user(chat_id):
+        try:
+            user_to_remove = message_text.split()[1]
+            # Validate the user ID format
+            if not user_to_remove.isdigit():
+                send_user_error(
+                    bot_token,
+                    chat_id,
+                    "❌ Invalid user ID format. Please provide a numeric chat ID.",
+                )
+                return "OK", 200
 
-        if message_text.lower() == "/listusers" and is_admin_user(chat_id):
-            users = get_authorized_users()
-            if users:
-                user_list = "\n".join([f"• {user}" for user in users])
+            # Check if user exists before trying to remove
+            authorized_users = get_authorized_users()
+            if user_to_remove not in authorized_users:
+                send_user_error(
+                    bot_token,
+                    chat_id,
+                    f"❌ User {user_to_remove} is not in the authorized users list.",
+                )
+                return "OK", 200
+
+            if remove_user_from_whitelist(user_to_remove):
                 send_telegram_message(
                     bot_token,
                     chat_id,
-                    f"👥 **Authorized Users** ({len(users)}):\n{user_list}",
+                    f"✅ User {user_to_remove} removed successfully!",
                 )
             else:
-                send_telegram_message(
-                    bot_token, chat_id, "👥 **No authorized users found**"
+                send_user_error(
+                    bot_token,
+                    chat_id,
+                    "❌ Failed to remove user. Please check the logs for details.",
                 )
-            return "OK", 200
+        except IndexError:
+            send_user_error(bot_token, chat_id, "❌ Usage: /removeuser <chat_id>")
+        return "OK", 200
 
-        if message_text.lower() == "/stats" and is_admin_user(chat_id):
-            stats = get_system_statistics()
-            stats_message = f"""
+    if message_text.lower() == "/listusers" and is_admin_user(chat_id):
+        users = get_authorized_users()
+        if users:
+            user_list = "\n".join([f"• {user}" for user in users])
+            send_telegram_message(
+                bot_token,
+                chat_id,
+                f"👥 **Authorized Users** ({len(users)}):\n{user_list}",
+            )
+        else:
+            send_telegram_message(
+                bot_token, chat_id, "👥 **No authorized users found**"
+            )
+        return "OK", 200
+
+    if message_text.lower() == "/stats" and is_admin_user(chat_id):
+        stats = get_system_statistics()
+        stats_message = f"""
 📊 **System Statistics**:
 👥 **Total Users**: {stats["total_users"]}
 📈 **Active Users Today**: {stats["active_users_today"]}
 🎯 **Total Tasks Completed**: {stats["total_tasks_completed"]}
 📊 **Average Accuracy**: {stats["average_accuracy"]:.1f}%
 """
-            send_telegram_message(bot_token, chat_id, stats_message)
-            return "OK", 200
+        send_telegram_message(bot_token, chat_id, stats_message)
+        return "OK", 200
 
-        # Main interaction state machine
-        current_state = get_firestore_state(user_doc_id=user_doc_id)
-        interaction_state = current_state.get("interaction_state", "idle")
-        if interaction_state == "awaiting_choice":
-            chosen_task_type = message_text
-            if chosen_task_type in config.tasks.task_types:
-                task_details = generate_task(gemini_key, chosen_task_type, user_doc_id)
-                if task_details and task_details.get("description"):
-                    new_state_data = {
-                        "interaction_state": "awaiting_answer",
-                        "chosen_task_type": chosen_task_type,
-                        "current_task_details": task_details,
-                        "task_id": f"{chosen_task_type}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}",
-                    }
-                    update_firestore_state(new_state_data, user_doc_id=user_doc_id)
-                    send_telegram_message(
-                        bot_token,
-                        chat_id,
-                        task_details["description"],
-                        reply_markup={"remove_keyboard": True},
-                    )
-                else:
-                    send_user_error(
-                        bot_token,
-                        chat_id,
-                        f"Sorry, I couldn't generate a '{chosen_task_type}' task. Try another or /newtask.",
-                    )
-                    update_firestore_state(
-                        {"interaction_state": "awaiting_choice"},
-                        user_doc_id=user_doc_id,
-                    )
-            else:
-                send_user_error(
+    if message_text.lower() == "/debugauth" and is_admin_user(chat_id):
+        try:
+            from utils import clear_secret_cache
+
+            # Clear cache and get fresh data
+            clear_secret_cache(config.secrets.authorized_users_secret_id)
+            authorized_users = get_authorized_users()
+            debug_message = f"""
+🔍 **Authorization Debug Info**:
+👥 **Current Authorized Users** ({len(authorized_users)}):
+{chr(10).join([f"• {user}" for user in authorized_users])}
+
+💾 **Cache Status**: Cleared and refreshed
+✅ **Ready for testing**
+"""
+            send_telegram_message(bot_token, chat_id, debug_message)
+        except Exception as e:
+            send_user_error(bot_token, chat_id, f"❌ Debug error: {str(e)}")
+        return "OK", 200
+
+    # Main interaction state machine
+    current_state = get_firestore_state(user_doc_id=user_doc_id)
+    interaction_state = current_state.get("interaction_state", "idle")
+    if interaction_state == "awaiting_choice":
+        chosen_task_type = message_text
+        if chosen_task_type in config.tasks.task_types:
+            task_details = generate_task(gemini_key, chosen_task_type, user_doc_id)
+            if task_details and task_details.get("description"):
+                new_state_data = {
+                    "interaction_state": "awaiting_answer",
+                    "chosen_task_type": chosen_task_type,
+                    "current_task_details": task_details,
+                    "task_id": f"{chosen_task_type}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}",
+                }
+                update_firestore_state(new_state_data, user_doc_id=user_doc_id)
+                send_telegram_message(
                     bot_token,
                     chat_id,
-                    "Hmm, that doesn't look like one of the options. Please choose a task type from the list I sent.",
-                )
-
-        elif interaction_state == "awaiting_answer":
-            task_details = current_state.get("current_task_details")
-            if not task_details:
-                send_user_error(
-                    bot_token,
-                    chat_id,
-                    "Sorry, I lost track of the current task. Please wait for the next prompt or use /newtask.",
-                )
-                update_firestore_state(
-                    {"interaction_state": "idle"}, user_doc_id=user_doc_id
+                    task_details["description"],
+                    reply_markup={"remove_keyboard": True},
                 )
                 return "OK", 200
-
-            task_type = task_details.get("type")
-            task_id = current_state.get("task_id", "unknown_task")
-            evaluation_result = None
-            feedback_text_to_send = (
-                "Sorry, I couldn't process your answer for evaluation."
+            else:
+                send_user_error(
+                    bot_token,
+                    chat_id,
+                    f"Sorry, I couldn't generate a '{chosen_task_type}' task. Try another or /newtask.",
+                )
+                update_firestore_state(
+                    {"interaction_state": "awaiting_choice"},
+                    user_doc_id=user_doc_id,
+                )
+                return "OK", 200
+        else:
+            send_user_error(
+                bot_token,
+                chat_id,
+                "Hmm, that doesn't look like one of the options. Please choose a task type from the list I sent.",
             )
-            is_correct_for_proficiency = False
+            return "OK", 200
 
-            if task_type == "Voice Recording Analysis":
-                if voice:
-                    file_id = voice.get("file_id")
-                    if file_id:
-                        audio_bytes_for_eval = None
-                        try:
-                            get_file_url = f"https://api.telegram.org/bot{bot_token}/getFile?file_id={file_id}"
-                            res_file_path = requests.get(get_file_url, timeout=10)
-                            res_file_path.raise_for_status()
-                            file_path_tg = (
-                                res_file_path.json().get("result", {}).get("file_path")
-                            )
-                            if file_path_tg:
-                                file_download_url = f"https://api.telegram.org/file/bot{bot_token}/{file_path_tg}"
-                                res_audio = requests.get(file_download_url, timeout=20)
-                                res_audio.raise_for_status()
-                                audio_bytes_for_eval = res_audio.content
-                            else:
-                                logger.error(
-                                    "Could not get file_path from Telegram for voice analysis."
-                                )
-                        except Exception as dl_err:
-                            logger.error(
-                                f"Failed to download voice for analysis: {dl_err}",
-                                exc_info=True,
-                            )
-                        if audio_bytes_for_eval:
-                            evaluation_result = evaluate_answer(
-                                gemini_key,
-                                task_details,
-                                user_audio_bytes=audio_bytes_for_eval,
-                                user_doc_id=user_doc_id,
-                            )
+    elif interaction_state == "awaiting_answer":
+        task_details = current_state.get("current_task_details")
+        if not task_details:
+            send_user_error(
+                bot_token,
+                chat_id,
+                "Sorry, I lost track of the current task. Please wait for the next prompt or use /newtask.",
+            )
+            update_firestore_state(
+                {"interaction_state": "idle"}, user_doc_id=user_doc_id
+            )
+            return "OK", 200
+
+        task_type = task_details.get("type")
+        task_id = current_state.get("task_id", "unknown_task")
+        evaluation_result = None
+        feedback_text_to_send = "Sorry, I couldn't process your answer for evaluation."
+        is_correct_for_proficiency = False
+
+        if task_type == "Voice Recording Analysis":
+            if voice:
+                file_id = voice.get("file_id")
+                if file_id:
+                    audio_bytes_for_eval = None
+                    try:
+                        get_file_url = f"https://api.telegram.org/bot{bot_token}/getFile?file_id={file_id}"
+                        res_file_path = requests.get(get_file_url, timeout=10)
+                        res_file_path.raise_for_status()
+                        file_path_tg = (
+                            res_file_path.json().get("result", {}).get("file_path")
+                        )
+                        if file_path_tg:
+                            file_download_url = f"https://api.telegram.org/file/bot{bot_token}/{file_path_tg}"
+                            res_audio = requests.get(file_download_url, timeout=20)
+                            res_audio.raise_for_status()
+                            audio_bytes_for_eval = res_audio.content
                         else:
-                            feedback_text_to_send = "I had trouble downloading your voice message for analysis. Please try sending it again."
-                            is_correct_for_proficiency = False
+                            logger.error(
+                                "Could not get file_path from Telegram for voice analysis."
+                            )
+                    except Exception as dl_err:
+                        logger.error(
+                            f"Failed to download voice for analysis: {dl_err}",
+                            exc_info=True,
+                        )
+                    if audio_bytes_for_eval:
+                        evaluation_result = evaluate_answer(
+                            gemini_key,
+                            task_details,
+                            user_audio_bytes=audio_bytes_for_eval,
+                            user_doc_id=user_doc_id,
+                        )
                     else:
-                        feedback_text_to_send = "I detected a voice message for analysis, but couldn't get its file ID. Please try sending it again."
+                        feedback_text_to_send = "I had trouble downloading your voice message for analysis. Please try sending it again."
                         is_correct_for_proficiency = False
                 else:
-                    feedback_text_to_send = f"For the task '{task_details.get('description')}', please send me a voice message as your answer."
+                    feedback_text_to_send = "I detected a voice message for analysis, but couldn't get its file ID. Please try sending it again."
                     is_correct_for_proficiency = False
             else:
-                user_answer_text_for_eval = message_text
-                if not user_answer_text_for_eval:
-                    feedback_text_to_send = "I didn't receive any text or understandable voice for your answer. Please try again."
-                    is_correct_for_proficiency = False
-                else:
-                    evaluation_result = evaluate_answer(
-                        gemini_key,
-                        task_details,
-                        user_answer_text=user_answer_text_for_eval,
-                        user_doc_id=user_doc_id,
-                    )
-            if isinstance(evaluation_result, dict):
-                feedback_text_to_send = evaluation_result.get(
-                    "feedback_text", feedback_text_to_send
-                )
-                is_correct_for_proficiency = evaluation_result.get("is_correct", False)
-            elif evaluation_result is not None:
-                feedback_text_to_send = str(evaluation_result)
-
-            send_telegram_message(bot_token, chat_id, feedback_text_to_send)
-
-            specific_item_tested = task_details.get("specific_item_tested")
-            item_type_for_proficiency = None
-            items_to_update = []
-
-            if task_type == "Idiom" and specific_item_tested:
-                item_type_for_proficiency = "phrasal_verbs"
-                items_to_update.append(specific_item_tested)
-            elif task_type == "Phrasal verb" and specific_item_tested:
-                item_type_for_proficiency = "phrasal_verbs"
-                items_to_update.append(specific_item_tested)
-            elif task_type == "Error correction" and specific_item_tested:
-                item_type_for_proficiency = "grammar_topics"
-                items_to_update.append(specific_item_tested)
-            elif task_type == "Vocabulary matching" and isinstance(
-                specific_item_tested, list
-            ):
-                item_type_for_proficiency = "vocabulary_words"
-                items_to_update.extend(specific_item_tested)
-            if (
-                item_type_for_proficiency
-                and items_to_update
-                and is_correct_for_proficiency is not None
-            ):
-                for item_name in items_to_update:
-                    update_user_proficiency(
-                        user_doc_id,
-                        item_type_for_proficiency,
-                        item_name,
-                        is_correct_for_proficiency,
-                        task_id,
-                    )
-
+                feedback_text_to_send = f"For the task '{task_details.get('description')}', please send me a voice message as your answer."
+                is_correct_for_proficiency = False
         else:
+            user_answer_text_for_eval = message_text
+            if not user_answer_text_for_eval:
+                feedback_text_to_send = "I didn't receive any text or understandable voice for your answer. Please try again."
+                is_correct_for_proficiency = False
+            else:
+                evaluation_result = evaluate_answer(
+                    gemini_key,
+                    task_details,
+                    user_answer_text=user_answer_text_for_eval,
+                    user_doc_id=user_doc_id,
+                )
+        if isinstance(evaluation_result, dict):
+            feedback_text_to_send = evaluation_result.get(
+                "feedback_text", feedback_text_to_send
+            )
+            is_correct_for_proficiency = evaluation_result.get("is_correct", False)
+        elif evaluation_result is not None:
+            feedback_text_to_send = str(evaluation_result)
+
+        # Send feedback and update state to wait for next user input
+        send_telegram_message(bot_token, chat_id, feedback_text_to_send)
+
+        # Update proficiency data in background (don't send additional messages)
+        specific_item_tested = task_details.get("specific_item_tested")
+        item_type_for_proficiency = None
+        items_to_update = []
+
+        if task_type == "Idiom" and specific_item_tested:
+            item_type_for_proficiency = "phrasal_verbs"
+            items_to_update.append(specific_item_tested)
+        elif task_type == "Phrasal verb" and specific_item_tested:
+            item_type_for_proficiency = "phrasal_verbs"
+            items_to_update.append(specific_item_tested)
+        elif task_type == "Error correction" and specific_item_tested:
+            item_type_for_proficiency = "grammar_topics"
+            items_to_update.append(specific_item_tested)
+        elif task_type == "Vocabulary matching" and isinstance(
+            specific_item_tested, list
+        ):
+            item_type_for_proficiency = "vocabulary_words"
+            items_to_update.extend(specific_item_tested)
+        if (
+            item_type_for_proficiency
+            and items_to_update
+            and is_correct_for_proficiency is not None
+        ):
+            for item_name in items_to_update:
+                update_user_proficiency(
+                    user_doc_id,
+                    item_type_for_proficiency,
+                    item_name,
+                    is_correct_for_proficiency,
+                    task_id,
+                )
+
+        # Reset state to idle to wait for next user action
+        update_firestore_state({"interaction_state": "idle"}, user_doc_id=user_doc_id)
+        return "OK", 200
+
+    else:
+        # Only send message if user is in idle state and sends something unexpected
+        if message_text and message_text.strip():
             send_user_error(
                 bot_token,
                 chat_id,
                 "I'm waiting for the next daily prompt to select a task type. You can use `/newtask` to reset if needed.",
             )
-
         return "OK", 200
-
-    except Exception as e:
-        logger.error(f"FATAL Error processing webhook request: {e}", exc_info=True)
-        if bot_token and chat_id and user_doc_id:
-            try:
-                update_firestore_state(
-                    {"interaction_state": "blocked_due_to_error"},
-                    user_doc_id=user_doc_id,
-                )
-                send_user_error(
-                    bot_token,
-                    chat_id,
-                    f"Debug: A critical error occurred in the webhook: {str(e)[:100]}\nThe bot is now paused. Please use /start or /newtask to reset.",
-                )
-            except Exception:
-                logger.error(
-                    "Failed to update state or notify user after fatal error.",
-                    exc_info=True,
-                )
-        return "Internal Server Error", 500
