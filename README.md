@@ -40,9 +40,7 @@ This project implements a sophisticated language learning system that:
   - Voice recording analysis
   - Vocabulary
   - Writing
-  - Listening
-  - Describing
-- **Difficulty Setting**: Users can set their English learner level (beginner, intermediate, advanced) with `/difficulty`. Vocabulary, describing, and listening tasks adapt to this setting.
+- **Difficulty Setting**: Users can set their English learner level (beginner, intermediate, advanced) with `/difficulty`. Vocabulary tasks adapt to this setting.
 - **Real-time Feedback**: Instant AI-powered evaluation and personalized feedback
 - **Voice Support**: Speech-to-text transcription and pronunciation analysis
 - **Interactive Interface**: Telegram keyboard buttons for seamless navigation
