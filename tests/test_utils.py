@@ -31,6 +31,7 @@ with (
         get_user_proficiency,
         update_user_proficiency,
         transcribe_voice,
+        evaluate_answer,
     )
 
 
@@ -129,6 +130,80 @@ class TestTaskGeneration:
         assert result["type"] == "Error correction"
         assert result["description"] is not None
         assert result["specific_item_tested"] == "Subject-Verb Agreement"
+
+    @patch("utils.get_user_proficiency")
+    @patch("utils.get_firestore_state")
+    @patch("utils.genai")
+    def test_generate_task_vocabulary_matching(
+        self, mock_genai, mock_firestore_state, mock_proficiency
+    ):
+        # Mock user proficiency data
+        mock_proficiency.return_value = {
+            "vocabulary_words": {
+                "perseverance": {
+                    "attempts": 3,
+                    "correct": 2,
+                    "last_attempt": "2024-01-01",
+                }
+            }
+        }
+
+        # Mock Firestore state
+        mock_firestore_state.return_value = {"difficulty_level": "advanced"}
+
+        # Mock Gemini response for vocabulary matching
+        mock_model = Mock()
+        mock_response_text = """ITEM: perseverance
+ITEM: resilience
+ITEM: tenacity
+
+A. the ability to recover quickly from difficulties
+B. persistence in doing something despite difficulty
+C. the quality of being determined and not giving up"""
+        mock_model.generate_content.return_value.text = mock_response_text
+        mock_genai.GenerativeModel.return_value = mock_model
+
+        result = generate_task("fake_key", "Vocabulary matching", "test_user")
+
+        assert result["type"] == "Vocabulary matching"
+        assert result["description"] is not None
+        assert "Vocabulary Matching Task" in result["description"]
+        assert "How to answer:" in result["description"]
+        assert result["specific_item_tested"] == [
+            "perseverance",
+            "resilience",
+            "tenacity",
+        ]
+
+    @patch("utils.get_user_proficiency")
+    @patch("utils.genai")
+    def test_evaluate_answer_vocabulary_matching(self, mock_genai, mock_proficiency):
+        # Mock user proficiency data
+        mock_proficiency.return_value = {}
+
+        # Mock Gemini response for evaluation
+        mock_model = Mock()
+        mock_model.generate_content.return_value.text = """Great job! You correctly matched all the words with their definitions.
+
+CORRECTNESS: YES"""
+        mock_genai.GenerativeModel.return_value = mock_model
+
+        task_details = {
+            "type": "Vocabulary matching",
+            "description": "**Vocabulary Matching Task**\n\nMatch the following words with their definitions:\n\n**Words:**\n1. perseverance\n2. resilience\n3. tenacity\n\n**Definitions:**\nA. the ability to recover quickly from difficulties\nB. persistence in doing something despite difficulty\nC. the quality of being determined and not giving up\n\n**How to answer:** Write your matches in the format '1-A, 2-B, 3-C' where the number is the word and the letter is the definition.",
+            "specific_item_tested": ["perseverance", "resilience", "tenacity"],
+        }
+
+        result = evaluate_answer(
+            "fake_key",
+            task_details,
+            user_answer_text="1-B, 2-A, 3-C",
+            user_doc_id="test_user",
+        )
+
+        assert result["feedback_text"] is not None
+        assert "Great job!" in result["feedback_text"]
+        assert result["is_correct"] is True
 
 
 class TestProgressReporting:
