@@ -31,7 +31,7 @@ This project implements a sophisticated language learning system that:
 ## 🚀 Features
 
 ### Core Learning Features
-- **10 Task Types**:
+- **8 Task Types**:
   - Error correction
   - Vocabulary matching
   - Idiom practice
