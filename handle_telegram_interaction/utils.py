@@ -122,11 +122,28 @@ def get_admin_users() -> List[str]:
 def update_user_list(secret_id: str, chat_id: str, add: bool) -> bool:
     users = _get_users_from_secret(secret_id)
     chat_id = str(chat_id)
+
+    # Validate chat_id format (should be numeric)
+    if not chat_id.isdigit():
+        logger.error(f"Invalid chat_id format: {chat_id}")
+        return False
+
+    operation_performed = False
+
     if add and chat_id not in users:
         users.append(chat_id)
+        operation_performed = True
+        logger.info(f"Added user {chat_id} to secret {secret_id}")
     elif not add and chat_id in users:
         users.remove(chat_id)
+        operation_performed = True
+        logger.info(f"Removed user {chat_id} from secret {secret_id}")
+    elif not add and chat_id not in users:
+        logger.warning(f"Attempted to remove user {chat_id} who was not in the list")
+        return False  # Return False if trying to remove non-existent user
+
     try:
+        # Always save in line-separated format for consistency
         users_text = "\n".join(users)
         secret_name = f"projects/{config.database.project_id}/secrets/{secret_id}"
         get_secret_client().add_secret_version(
@@ -135,22 +152,29 @@ def update_user_list(secret_id: str, chat_id: str, add: bool) -> bool:
                 "payload": {"data": users_text.encode("UTF-8")},
             }
         )
-        return True
+        logger.info(f"Successfully updated secret {secret_id} with {len(users)} users")
+        return operation_performed
     except Exception as e:
         logger.error(f"Error updating user list secret {secret_id}: {e}", exc_info=True)
         return False
 
 
 def add_user_to_whitelist(chat_id: str) -> bool:
-    return update_user_list(
+    operation_performed = update_user_list(
         config.secrets.authorized_users_secret_id, chat_id, add=True
     )
+    if operation_performed:
+        clear_secret_cache(config.secrets.authorized_users_secret_id)
+    return operation_performed
 
 
 def remove_user_from_whitelist(chat_id: str) -> bool:
-    return update_user_list(
+    operation_performed = update_user_list(
         config.secrets.authorized_users_secret_id, chat_id, add=False
     )
+    if operation_performed:
+        clear_secret_cache(config.secrets.authorized_users_secret_id)
+    return operation_performed
 
 
 def is_user_authorized(chat_id: str) -> bool:
@@ -1266,3 +1290,24 @@ def get_system_statistics() -> dict:
     except Exception as e:
         logger.error(f"Error calculating system statistics: {e}", exc_info=True)
         return stats
+
+
+# --- Secret Cache Management ---
+_secret_cache = {}
+
+
+def clear_secret_cache(secret_id: Optional[str] = None):
+    """Clear the secret cache for a specific secret or all secrets."""
+    global _secret_cache
+    if secret_id:
+        # Clear specific secret
+        keys_to_remove = [
+            key for key in _secret_cache.keys() if key.startswith(f"{secret_id}:")
+        ]
+        for key in keys_to_remove:
+            del _secret_cache[key]
+        logger.info(f"Cleared cache for secret: {secret_id}")
+    else:
+        # Clear all secrets
+        _secret_cache.clear()
+        logger.info("Cleared all secret cache")
