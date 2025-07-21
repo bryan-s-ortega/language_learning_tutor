@@ -828,21 +828,26 @@ def evaluate_answer(
 def send_choice_request_message(bot_token, chat_id, user_doc_id):
     logger.info(f"Attempting to send choice request message to {chat_id}")
     try:
-        keyboard_buttons = [[task_type] for task_type in config.tasks.task_types]
+        task_types = config.tasks.task_types
+        keyboard_buttons = [[task_type] for task_type in task_types]
         reply_markup = {
             "keyboard": keyboard_buttons,
             "one_time_keyboard": True,
             "resize_keyboard": True,
         }
 
-        message_text = "👋 Okay, let's start a new task! What type of English practice would you like?\nChoose one option from the keyboard below:"
+        # Build a numbered menu
+        numbered_menu = "\n".join(
+            [f"{i + 1}. {task_type}" for i, task_type in enumerate(task_types)]
+        )
+        message_text = (
+            "👋 Okay, let's start a new task! What type of English practice would you like?\n"
+            "You can reply with the *number* of the task or tap a button below.\n\n"
+            f"{numbered_menu}"
+        )
 
         # Add adaptive learning suggestions if user_doc_id is provided
-        if user_doc_id:
-            proficiency_data = get_user_proficiency(user_doc_id)
-            if proficiency_data:
-                suggested_task_type = get_adaptive_task_type(proficiency_data)
-                message_text += f"\n\n💡 **Adaptive Suggestion**: Based on your learning progress, I recommend trying **{suggested_task_type}** to focus on areas where you can improve most!"
+        # (Optional: can be removed if old logic is not wanted)
 
         success = send_telegram_message(bot_token, chat_id, message_text, reply_markup)
         if success:

@@ -472,7 +472,13 @@ def handle_telegram_interaction(request) -> Any:
     interaction_state = current_state.get("interaction_state", "idle")
     if interaction_state == "awaiting_choice":
         chosen_task_type = message_text
-        if chosen_task_type in config.tasks.task_types:
+        task_types = config.tasks.task_types
+        # Allow selection by number
+        if message_text.isdigit():
+            idx = int(message_text) - 1
+            if 0 <= idx < len(task_types):
+                chosen_task_type = task_types[idx]
+        if chosen_task_type in task_types:
             task_details = generate_task(gemini_key, chosen_task_type, user_doc_id)
             if task_details and task_details.get("description"):
                 new_state_data = {
@@ -711,7 +717,6 @@ def handle_telegram_interaction(request) -> Any:
                 )
 
         # Reset state to idle to wait for next user action
-        update_firestore_state({"interaction_state": "idle"}, user_doc_id=user_doc_id)
         return "OK", 200
 
     else:
