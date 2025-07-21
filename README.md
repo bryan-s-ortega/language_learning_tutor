@@ -22,9 +22,8 @@ This project implements a sophisticated language learning system that:
 
 - **🤖 AI-Powered Task Generation**: Uses Google's Gemini AI to create engaging, personalized English learning tasks
 - **📱 Telegram Integration**: Delivers learning content through an intuitive Telegram bot interface
-- **🧠 Adaptive Learning**: Implements intelligent algorithms that focus on user's weak areas
+- **🧠 Adaptive Learning**: Avoids repeating previously practiced main learning objectives for each task type, using user history
 - **📊 Progress Tracking**: Comprehensive analytics and progress reporting
-- **🔄 Spaced Repetition**: Optimizes learning intervals for better retention
 - **🎙️ Voice Analysis**: Supports voice recording analysis for pronunciation practice
 - **☁️ Cloud-Native**: Built on Google Cloud Functions for scalability and reliability
 
@@ -46,10 +45,7 @@ This project implements a sophisticated language learning system that:
 - **Interactive Interface**: Telegram keyboard buttons for seamless navigation
 
 ### Adaptive Learning System
-- **Weak Area Detection**: Automatically identifies topics where users struggle
-- **Personalized Tasks**: Generates content focused on improving weak areas
-- **Smart Task Selection**: Recommends optimal task types based on performance
-- **Spaced Repetition**: Reviews items at optimal intervals based on mastery levels
+- **Personalized Tasks**: Ensures users always get new, unique learning content based on their own practice history.
 - **Progress Analytics**: Detailed reports with actionable recommendations
 
 ### Technical Features

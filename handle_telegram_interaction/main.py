@@ -625,6 +625,91 @@ def handle_telegram_interaction(request) -> Any:
                     task_id,
                 )
 
+        # Save recent objectives for all applicable task types
+        if task_type == "Topic Voice Recording" and specific_item_tested:
+            user_state = get_firestore_state(user_doc_id=user_doc_id)
+            recent_topics = user_state.get("recent_topic_voice_recording", [])
+            if specific_item_tested not in recent_topics:
+                recent_topics.append(specific_item_tested)
+                update_firestore_state(
+                    {"recent_topic_voice_recording": recent_topics},
+                    user_doc_id=user_doc_id,
+                )
+        elif task_type == "Idiom" and specific_item_tested:
+            user_state = get_firestore_state(user_doc_id=user_doc_id)
+            recent_idiom = user_state.get("recent_idiom", [])
+            if specific_item_tested not in recent_idiom:
+                recent_idiom.append(specific_item_tested)
+                update_firestore_state(
+                    {"recent_idiom": recent_idiom}, user_doc_id=user_doc_id
+                )
+        elif task_type == "Phrasal verb" and specific_item_tested:
+            user_state = get_firestore_state(user_doc_id=user_doc_id)
+            recent_phrasal_verb = user_state.get("recent_phrasal_verb", [])
+            if specific_item_tested not in recent_phrasal_verb:
+                recent_phrasal_verb.append(specific_item_tested)
+                update_firestore_state(
+                    {"recent_phrasal_verb": recent_phrasal_verb},
+                    user_doc_id=user_doc_id,
+                )
+        elif task_type == "Vocabulary matching" and specific_item_tested:
+            user_state = get_firestore_state(user_doc_id=user_doc_id)
+            recent_vocabulary_matching = user_state.get(
+                "recent_vocabulary_matching", []
+            )
+            for word in specific_item_tested:
+                if word not in recent_vocabulary_matching:
+                    recent_vocabulary_matching.append(word)
+            update_firestore_state(
+                {"recent_vocabulary_matching": recent_vocabulary_matching},
+                user_doc_id=user_doc_id,
+            )
+        elif task_type == "Vocabulary" and specific_item_tested:
+            user_state = get_firestore_state(user_doc_id=user_doc_id)
+            recent_vocabulary = user_state.get("recent_vocabulary", [])
+            for word in specific_item_tested:
+                if word not in recent_vocabulary:
+                    recent_vocabulary.append(word)
+            update_firestore_state(
+                {"recent_vocabulary": recent_vocabulary}, user_doc_id=user_doc_id
+            )
+        elif task_type == "Writing" and specific_item_tested:
+            user_state = get_firestore_state(user_doc_id=user_doc_id)
+            recent_writing = user_state.get("recent_writing", [])
+            if specific_item_tested not in recent_writing:
+                recent_writing.append(specific_item_tested)
+                update_firestore_state(
+                    {"recent_writing": recent_writing}, user_doc_id=user_doc_id
+                )
+        elif task_type == "Error correction" and specific_item_tested:
+            user_state = get_firestore_state(user_doc_id=user_doc_id)
+            recent_error_correction = user_state.get("recent_error_correction", [])
+            if specific_item_tested not in recent_error_correction:
+                recent_error_correction.append(specific_item_tested)
+                # Limit to last 15
+                recent_error_correction = recent_error_correction[-15:]
+                update_firestore_state(
+                    {"recent_error_correction": recent_error_correction},
+                    user_doc_id=user_doc_id,
+                )
+        elif task_type == "Word starting with letter" and specific_item_tested:
+            user_state = get_firestore_state(user_doc_id=user_doc_id)
+            recent_word_starting_with_letter = user_state.get(
+                "recent_word_starting_with_letter", []
+            )
+            if specific_item_tested not in recent_word_starting_with_letter:
+                recent_word_starting_with_letter.append(specific_item_tested)
+                # Limit to last 15
+                recent_word_starting_with_letter = recent_word_starting_with_letter[
+                    -15:
+                ]
+                update_firestore_state(
+                    {
+                        "recent_word_starting_with_letter": recent_word_starting_with_letter
+                    },
+                    user_doc_id=user_doc_id,
+                )
+
         # Reset state to idle to wait for next user action
         update_firestore_state({"interaction_state": "idle"}, user_doc_id=user_doc_id)
         return "OK", 200

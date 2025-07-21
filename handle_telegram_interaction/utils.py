@@ -362,17 +362,8 @@ def send_telegram_message(
 
 # --- Helper: Generate Task via Gemini ---
 def generate_task(gemini_key, task_type, user_doc_id, topic=None):
-    proficiency_data = get_user_proficiency(user_doc_id)
     user_state = get_firestore_state(user_doc_id)
     difficulty_level = user_state.get("difficulty_level", "advanced")
-    weak_items = analyze_user_weaknesses(proficiency_data, task_type)
-    review_items = get_items_for_review(proficiency_data, task_type)
-    prompt_base = get_adaptive_task_prompt(task_type, weak_items, topic)
-    if review_items and not weak_items:
-        review_areas = [item["name"] for item in review_items[:2]]
-        prompt_base += (
-            f"\n\nConsider including review of these areas: {', '.join(review_areas)}."
-        )
     task_details_dict = {
         "type": task_type,
         "specific_item_tested": None,
@@ -381,15 +372,32 @@ def generate_task(gemini_key, task_type, user_doc_id, topic=None):
     prompt = ""
     instruction_prefix = "Present the following task for the user to answer. Do NOT answer or solve the task yourself. Do NOT justify or explain your instructions. "
     if task_type == "Error correction":
-        prompt = prompt_base + (
+        recent_objectives = user_state.get("recent_error_correction", [])[-15:]
+        avoid_text = ""
+        if recent_objectives:
+            avoid_text = (
+                "\nIMPORTANT: Do NOT use any of these grammar concepts, as the user has already practiced them: "
+                + "; ".join(recent_objectives)
+                + ". Choose a new, unique concept."
+            )
+        prompt = (
             instruction_prefix
             + "Focus on a common English grammatical error (e.g., subject-verb agreement, tense misuse, articles, prepositions). "
             "On a NEW line, identify the specific grammar concept being tested, like 'ITEM: [grammar concept name]'. "
             "Then, on a NEW line, provide a single sentence containing this error for the user to correct. "
             "Example for ITEM: Past Simple Irregular Verb\nSentence: He goed to the park."
+            + avoid_text
         )
     elif task_type == "Vocabulary matching":
-        prompt = prompt_base + (
+        recent_objectives = user_state.get("recent_vocabulary_matching", [])
+        avoid_text = ""
+        if recent_objectives:
+            avoid_text = (
+                "\nIMPORTANT: Do NOT use any of these words, as the user has already practiced them: "
+                + "; ".join(recent_objectives)
+                + ". Choose new, unique words."
+            )
+        prompt = (
             instruction_prefix
             + f"Provide 3 related English vocabulary words suitable for a {difficulty_level} learner. "
             "For each word, on a NEW line, identify it like 'ITEM: [word]'. "
@@ -401,51 +409,95 @@ def generate_task(gemini_key, task_type, user_doc_id, topic=None):
             "ITEM: word3\n\n"
             "A. definition for word2\n"
             "B. definition for word1\n"
-            "C. definition for word3"
+            "C. definition for word3" + avoid_text
         )
     elif task_type == "Idiom":
-        prompt = prompt_base + (
+        recent_objectives = user_state.get("recent_idiom", [])
+        avoid_text = ""
+        if recent_objectives:
+            avoid_text = (
+                "\nIMPORTANT: Do NOT use any of these idioms, as the user has already practiced them: "
+                + "; ".join(recent_objectives)
+                + ". Choose a new, unique idiom."
+            )
+        prompt = (
             instruction_prefix + "Choose one common English idiom. "
             "On a NEW line, identify it clearly, like 'ITEM: [idiom]'. "
             "Then, on subsequent lines, explain its meaning and provide one clear example sentence. "
-            "Finally, ask the user to write their own sentence using it."
+            "Finally, ask the user to write their own sentence using it." + avoid_text
         )
     elif task_type == "Phrasal verb":
-        prompt = prompt_base + (
+        recent_objectives = user_state.get("recent_phrasal_verb", [])
+        avoid_text = ""
+        if recent_objectives:
+            avoid_text = (
+                "\nIMPORTANT: Do NOT use any of these phrasal verbs, as the user has already practiced them: "
+                + "; ".join(recent_objectives)
+                + ". Choose a new, unique phrasal verb."
+            )
+        prompt = (
             instruction_prefix + "Choose one common English phrasal verb. "
             "On a NEW line, identify it clearly, like 'ITEM: [phrasal verb]'. "
             "Then, on subsequent lines, explain its meaning and provide one clear example sentence. "
-            "Finally, ask the user to write their own sentence using it."
+            "Finally, ask the user to write their own sentence using it." + avoid_text
         )
     elif task_type == "Vocabulary":
-        prompt = prompt_base + (
+        recent_objectives = user_state.get("recent_vocabulary", [])
+        avoid_text = ""
+        if recent_objectives:
+            avoid_text = (
+                "\nIMPORTANT: Do NOT use any of these words, as the user has already practiced them: "
+                + "; ".join(recent_objectives)
+                + ". Choose new, unique words."
+            )
+        prompt = (
             instruction_prefix
             + f"Provide 5 English words suitable for a {difficulty_level} learner. "
             "For each word, on a NEW line, identify it like 'ITEM: [word]'. "
             "After listing all ITEMs, provide their definitions. "
             "Make it clear the user should try to use each word in a sentence."
+            + avoid_text
         )
     elif task_type == "Writing":
-        prompt = prompt_base + (
+        recent_objectives = user_state.get("recent_writing", [])
+        avoid_text = ""
+        if recent_objectives:
+            avoid_text = (
+                "\nIMPORTANT: Do NOT use any of these writing prompts, as the user has already practiced them: "
+                + "; ".join(recent_objectives)
+                + ". Choose a new, unique prompt."
+            )
+        prompt = (
             instruction_prefix
             + "Ask the user a thoughtful, open-ended question that encourages them to write an extensive answer (at least 5 sentences). "
             "The question should be relevant to daily life, culture, or personal growth. "
-            "Make it clear that the user should write as much as possible."
+            "Make it clear that the user should write as much as possible." + avoid_text
         )
     elif task_type == "Word starting with letter":
-        letter = random.choice("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
-        prompt = prompt_base + (
+        recent_objectives = user_state.get("recent_word_starting_with_letter", [])[-15:]
+        avoid_text = ""
+        if recent_objectives:
+            avoid_text = (
+                "\nIMPORTANT: Do NOT use any of these letters, as the user has already practiced them: "
+                + "; ".join(recent_objectives)
+                + ". Choose a new, unique letter."
+            )
+        chosen_letter = random.choice("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+        prompt = (
             instruction_prefix
-            + "This is a fluency task. List as many English words as you can starting with the letter '{letter}' in one minute."
+            + f"This is a fluency task. List as many English words as you can starting with the letter '{chosen_letter}' in one minute."
+            + avoid_text
         )
         task_details_dict["description"] = (
-            f"This is a fluency task. List as many English words as you can starting with the letter '{letter}' in one minute."
+            f"This is a fluency task. List as many English words as you can starting with the letter '{chosen_letter}' in one minute."
         )
-        task_details_dict["specific_item_tested"] = f"words_starting_with_{letter}"
-        logger.info(f"Generated task for Word starting with letter: {letter}")
+        task_details_dict["specific_item_tested"] = (
+            f"words_starting_with_{chosen_letter}"
+        )
+        logger.info(f"Generated task for Word starting with letter: {chosen_letter}")
         return task_details_dict
     elif task_type == "Free Style Voice Recording":
-        prompt = prompt_base + (
+        prompt = (
             instruction_prefix
             + "Ask the user to record a voice message of any length. The instruction should be to talk about any topic they wish. Output only the instruction for the user."
         )
@@ -470,18 +522,41 @@ def generate_task(gemini_key, task_type, user_doc_id, topic=None):
             )
             return task_details_dict
     elif task_type == "Topic Voice Recording":
-        prompt = prompt_base + (
+        # Get recent topics from user state
+        recent_topics = user_state.get("recent_topic_voice_recording", [])
+        avoid_topics_text = ""
+        if recent_topics:
+            avoid_topics_text = (
+                "\nIMPORTANT: Do NOT use any of these topics, as the user has already practiced them: "
+                + "; ".join(recent_topics)
+                + ". Choose a new, unique topic."
+            )
+        prompt = (
             instruction_prefix
             + "Ask the user to record a voice message of any length. First, generate a specific topic for the user to talk about (the topic can be anything). Output only the instruction for the user, including the topic."
+            + avoid_topics_text
         )
         logger.info(f"Generating topic voice task instruction with prompt: {prompt}")
         genai.configure(api_key=gemini_key)
         model = genai.GenerativeModel(config.ai.gemini_model_name)
         instruction_response = model.generate_content(prompt)
         if instruction_response.text:
-            task_details_dict["description"] = instruction_response.text.strip()
+            desc = instruction_response.text.strip()
+            task_details_dict["description"] = desc
+            # Try to extract the topic from the instruction
+            topic_match = re.search(r"topic[:\-\s]+(.+)", desc, re.IGNORECASE)
+            if topic_match:
+                topic = topic_match.group(1).strip()
+            else:
+                # Fallback: use the first sentence or line
+                topic = (
+                    desc.split(". ")[0]
+                    .replace("Record a voice message about ", "")
+                    .strip()
+                )
+            task_details_dict["specific_item_tested"] = topic
             logger.info(
-                f"Generated topic voice task instruction: {task_details_dict['description']}"
+                f"Generated topic voice task instruction: {desc} | Extracted topic: {topic}"
             )
             return task_details_dict
         else:
@@ -491,6 +566,7 @@ def generate_task(gemini_key, task_type, user_doc_id, topic=None):
             task_details_dict["description"] = (
                 "Please record a voice message about the following topic: [AI will provide a topic]. I will analyze your spoken English."
             )
+            task_details_dict["specific_item_tested"] = None
             return task_details_dict
     else:
         logger.warning(
@@ -806,77 +882,6 @@ def get_user_proficiency(user_doc_id):
 
 
 # --- Adaptive Learning Helpers ---
-def analyze_user_weaknesses(proficiency_data, task_type):
-    """
-    Analyze user proficiency data to identify weak areas for a specific task type.
-    Returns a list of items that need more practice.
-    """
-    if not proficiency_data:
-        return []
-
-    weak_items = []
-    item_type_key = None
-
-    # Map task types to proficiency categories
-    if task_type == "Error correction":
-        item_type_key = "grammar_topics"
-    elif task_type == "Vocabulary matching":
-        item_type_key = "vocabulary_words"
-    elif task_type == "Idiom/Phrasal verb":
-        item_type_key = "phrasal_verbs"
-
-    if not item_type_key or item_type_key not in proficiency_data:
-        return []
-
-    items = proficiency_data[item_type_key]
-
-    # Find items with low mastery level (below 0.7) and sufficient attempts (at least 2)
-    for item_name, stats in items.items():
-        mastery_level = stats.get("mastery_level", 0.0)
-        attempts = stats.get("attempts", 0)
-
-        if attempts >= 2 and mastery_level < 0.7:
-            weak_items.append(
-                {
-                    "name": item_name,
-                    "mastery_level": mastery_level,
-                    "attempts": attempts,
-                    "priority_score": (0.7 - mastery_level)
-                    * attempts,  # Higher priority for more attempts with low mastery
-                }
-            )
-
-    # Sort by priority score (highest first)
-    weak_items.sort(key=lambda x: x["priority_score"], reverse=True)
-
-    logger.info(
-        f"Found {len(weak_items)} weak items for {task_type}: {[item['name'] for item in weak_items[:3]]}"
-    )
-    return weak_items
-
-
-def get_adaptive_task_prompt(task_type, weak_items, topic=None):
-    """
-    Generate an adaptive prompt based on user's weak areas.
-    """
-    prompt_base = f"Generate an English learning task for an advanced learner. Task Type: '{task_type}'. "
-
-    if topic:
-        prompt_base += f"The general theme for today is '{topic}'. "
-
-    if weak_items:
-        weak_areas = [
-            item["name"] for item in weak_items[:3]
-        ]  # Focus on top 3 weak areas
-        prompt_base += f"\n\nIMPORTANT: The user has been struggling with these specific areas: {', '.join(weak_areas)}. "
-        prompt_base += "Please focus the task on one or more of these weak areas to help them improve. "
-        prompt_base += "Make the task slightly easier than usual since these are challenging areas for the user."
-    else:
-        prompt_base += "\n\nThe user has been performing well in this area. Please provide a task that challenges them appropriately."
-
-    return prompt_base
-
-
 def get_adaptive_task_type(proficiency_data):
     """
     Suggest the best task type based on user's overall performance.
@@ -928,81 +933,6 @@ def get_adaptive_task_type(proficiency_data):
         return worst_task_type
 
     return random.choice(config.tasks.task_types)
-
-
-def should_review_item(item_stats, days_since_last_attempt=7):
-    """
-    Determine if an item should be reviewed based on spaced repetition principles.
-    """
-    if not item_stats or "last_attempt_timestamp" not in item_stats:
-        return True  # Never attempted, should review
-
-    last_attempt = item_stats["last_attempt_timestamp"]
-    if not last_attempt:
-        return True
-
-    # Convert Firestore timestamp to datetime
-    from datetime import datetime, timezone
-
-    if hasattr(last_attempt, "timestamp"):
-        last_attempt_dt = datetime.fromtimestamp(
-            last_attempt.timestamp(), tz=timezone.utc
-        )
-    else:
-        last_attempt_dt = last_attempt
-
-    days_elapsed = (datetime.now(timezone.utc) - last_attempt_dt).days
-
-    mastery_level = item_stats.get("mastery_level", 0.0)
-
-    # Spaced repetition logic:
-    # - Low mastery (< 0.5): review every 3 days
-    # - Medium mastery (0.5-0.8): review every 7 days
-    # - High mastery (> 0.8): review every 14 days
-    if mastery_level < 0.5:
-        return days_elapsed >= 3
-    elif mastery_level < 0.8:
-        return days_elapsed >= 7
-    else:
-        return days_elapsed >= 14
-
-
-def get_items_for_review(proficiency_data, task_type):
-    """
-    Get items that should be reviewed based on spaced repetition.
-    """
-    if not proficiency_data:
-        return []
-
-    item_type_key = None
-    if task_type == "Error correction":
-        item_type_key = "grammar_topics"
-    elif task_type == "Vocabulary matching":
-        item_type_key = "vocabulary_words"
-    elif task_type == "Idiom/Phrasal verb":
-        item_type_key = "phrasal_verbs"
-
-    if not item_type_key or item_type_key not in proficiency_data:
-        return []
-
-    items = proficiency_data[item_type_key]
-    review_items = []
-
-    for item_name, stats in items.items():
-        if should_review_item(stats):
-            review_items.append(
-                {
-                    "name": item_name,
-                    "mastery_level": stats.get("mastery_level", 0.0),
-                    "attempts": stats.get("attempts", 0),
-                }
-            )
-
-    # Sort by mastery level (lowest first for review priority)
-    review_items.sort(key=lambda x: x["mastery_level"])
-
-    logger.info(f"Found {len(review_items)} items for review in {task_type}")
-    return review_items
 
 
 def generate_progress_report(proficiency_data):
