@@ -88,7 +88,8 @@ I'm your AI-powered English learning assistant. Here's how to get started:
 • Idiom practice
 • Phrasal verb practice
 • Word fluency exercises
-• Voice recording analysis
+• Free style voice recording
+• Topic voice recording
 • Vocabulary
 • Writing
 
@@ -526,7 +527,7 @@ def handle_telegram_interaction(request) -> Any:
         feedback_text_to_send = "Sorry, I couldn't process your answer for evaluation."
         is_correct_for_proficiency = False
 
-        if task_type == "Voice Recording Analysis":
+        if task_type in ["Free Style Voice Recording", "Topic Voice Recording"]:
             if voice:
                 file_id = voice.get("file_id")
                 if file_id:

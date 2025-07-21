@@ -33,7 +33,8 @@ class TaskConfig:
                 "Idiom",
                 "Phrasal verb",
                 "Word starting with letter",
-                "Voice Recording Analysis",
+                "Free Style Voice Recording",
+                "Topic Voice Recording",
                 "Vocabulary",
                 "Writing",
             ]

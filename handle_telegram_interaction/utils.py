@@ -444,27 +444,52 @@ def generate_task(gemini_key, task_type, user_doc_id, topic=None):
         task_details_dict["specific_item_tested"] = f"words_starting_with_{letter}"
         logger.info(f"Generated task for Word starting with letter: {letter}")
         return task_details_dict
-    elif task_type == "Voice Recording Analysis":
+    elif task_type == "Free Style Voice Recording":
         prompt = prompt_base + (
             instruction_prefix
-            + "Ask the user to record a voice message of any length. The instruction should be to talk about any topic. Output only the instruction for the user."
+            + "Ask the user to record a voice message of any length. The instruction should be to talk about any topic they wish. Output only the instruction for the user."
         )
-        logger.info(f"Generating voice task instruction with prompt: {prompt}")
+        logger.info(
+            f"Generating free style voice task instruction with prompt: {prompt}"
+        )
         genai.configure(api_key=gemini_key)
         model = genai.GenerativeModel(config.ai.gemini_model_name)
         instruction_response = model.generate_content(prompt)
         if instruction_response.text:
             task_details_dict["description"] = instruction_response.text.strip()
             logger.info(
-                f"Generated voice task instruction: {task_details_dict['description']}"
+                f"Generated free style voice task instruction: {task_details_dict['description']}"
             )
             return task_details_dict
         else:
             logger.warning(
-                "Gemini failed to generate voice task instruction, using fallback."
+                "Gemini failed to generate free style voice task instruction, using fallback."
             )
             task_details_dict["description"] = (
-                "Please record a voice message. I will analyze your spoken English."
+                "Please record a voice message about any topic you wish. I will analyze your spoken English."
+            )
+            return task_details_dict
+    elif task_type == "Topic Voice Recording":
+        prompt = prompt_base + (
+            instruction_prefix
+            + "Ask the user to record a voice message of any length. First, generate a specific topic for the user to talk about (the topic can be anything). Output only the instruction for the user, including the topic."
+        )
+        logger.info(f"Generating topic voice task instruction with prompt: {prompt}")
+        genai.configure(api_key=gemini_key)
+        model = genai.GenerativeModel(config.ai.gemini_model_name)
+        instruction_response = model.generate_content(prompt)
+        if instruction_response.text:
+            task_details_dict["description"] = instruction_response.text.strip()
+            logger.info(
+                f"Generated topic voice task instruction: {task_details_dict['description']}"
+            )
+            return task_details_dict
+        else:
+            logger.warning(
+                "Gemini failed to generate topic voice task instruction, using fallback."
+            )
+            task_details_dict["description"] = (
+                "Please record a voice message about the following topic: [AI will provide a topic]. I will analyze your spoken English."
             )
             return task_details_dict
     else:
@@ -609,7 +634,7 @@ def evaluate_answer(
     content_for_gemini = []
     is_correct_assessment_possible = True
 
-    if task_type == "Voice Recording Analysis":
+    if task_type in ["Free Style Voice Recording", "Topic Voice Recording"]:
         is_correct_assessment_possible = False
         if user_audio_bytes:
             prompt_parts.append(
@@ -625,9 +650,7 @@ def evaluate_answer(
             audio_part = {"mime_type": audio_mime_type, "data": user_audio_bytes}
             content_for_gemini = prompt_parts + [audio_part]
         else:
-            logger.error(
-                "Expected audio for Voice Recording Analysis, but none provided."
-            )
+            logger.error(f"Expected audio for {task_type}, but none provided.")
             return {
                 "feedback_text": "It seems you were supposed to send a voice message for this task, but I didn't receive any audio.",
                 "is_correct": False,
@@ -669,7 +692,10 @@ def evaluate_answer(
             "substantially correct for the main goal of the task by writing 'CORRECTNESS: YES' or 'CORRECTNESS: NO'."
         )
 
-    if not content_for_gemini and task_type != "Voice Recording Analysis":
+    if not content_for_gemini and task_type not in [
+        "Free Style Voice Recording",
+        "Topic Voice Recording",
+    ]:
         content_for_gemini = "\n".join(prompt_parts)
 
     if not content_for_gemini:
