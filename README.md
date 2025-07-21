@@ -10,11 +10,11 @@ An intelligent, adaptive English learning tutor built with Google Cloud Function
 
 ### Usage
 
-1. **Start Learning**: Send `/newtask` to your Telegram bot to start learning.  
-2. **Set Difficulty**: Use `/difficulty` to choose your English learner level (beginner, intermediate, advanced)
-3. **Check Progress**: Use `/progress` to see your learning statistics
-4. **Practice**: Complete tasks and receive personalized feedback
-5. **Voice Practice**: Send voice messages for pronunciation analysis
+1. **Start Learning**: Use `/start` to start interacting with the bot.
+2. **Set language**: Use `/language` to choose language of responses.
+3. **Set Difficulty**: Use `/difficulty` to choose your English learner level (beginner, intermediate, advanced).
+4. **Practice**: Send `/newtask` to your Telegram bot to start learning and receive personalized feedback.
+5. **Check Progress**: Use `/progress` to see your learning statistics.
 
 ## 🎯 Overview
 
@@ -41,9 +41,8 @@ This project implements a sophisticated language learning system that:
   - Vocabulary
   - Writing
 - **Difficulty Setting**: Users can set their English learner level (beginner, intermediate, advanced) with `/difficulty`. Vocabulary tasks adapt to this setting.
-- **Real-time Feedback**: Instant AI-powered evaluation and personalized feedback
-- **Voice Support**: Speech-to-text transcription and pronunciation analysis
-- **Interactive Interface**: Telegram keyboard buttons for seamless navigation
+- **Real-time Feedback**: Instant AI-powered evaluation and personalized feedback.
+- **Voice Support**: Multimodal llm for handling voice recordings.
 
 ### Adaptive Learning System
 - **Personalized Tasks**: Ensures users always get new, unique learning content based on their own practice history.
@@ -55,7 +54,7 @@ This project implements a sophisticated language learning system that:
 - **Secure Secrets Management**: Google Secret Manager for API keys and tokens
 - **NoSQL Database**: Firestore for user data and progress tracking
 - **AI Integration**: Google Gemini for intelligent content generation
-- **Voice Processing**: Google Speech-to-Text for audio analysis
+- **Voice Processing**: Google multimodal llm for audio analysis
 
 ## 🛠️ Technology Stack
 
@@ -92,10 +91,11 @@ This project implements a sophisticated language learning system that:
 ## Task Types & Difficulty
 
 - **Error correction**: Fix grammatical errors in sentences
-- **Vocabulary matching**: Match words with their definitions (difficulty affects word level)
+- **Vocabulary matching**: Match words with their definitions
 - **Idiom practice**: Learn and practice English idioms
 - **Phrasal verb practice**: Learn and practice English phrasal verbs
 - **Word fluency**: Generate words starting with specific letters
-- **Voice recording analysis**: Practice pronunciation with voice analysis
-- **Vocabulary**: Learn 5 words and use them in sentences (difficulty affects word level)
+- **Freestyle voice recording**: Practice pronunciation with any topic
+- **Topic voice recording**: Practice pronunciation with a provided topic
+- **Vocabulary**: Learn 5 words and use them in sentences
 - **Writing**: Answer a thoughtful, open-ended question
