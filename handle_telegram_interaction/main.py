@@ -312,9 +312,9 @@ def handle_telegram_interaction(request) -> Any:
     # Handle commands
     if message_text.lower() in command_handlers:
         handler = command_handlers[message_text.lower()]
-        if message_text.lower() == "/difficulty":
+        if message_text.lower() == "/difficulty" or message_text.lower() == "/language":
             return handler(bot_token, chat_id, user_doc_id, current_state=current_state)
-        elif message_text.lower() in ["/start", "/progress", "/language"]:
+        elif message_text.lower() in ["/start", "/progress"]:
             return handler(bot_token, chat_id, user_doc_id)
         else:
             return handler(bot_token, chat_id)
