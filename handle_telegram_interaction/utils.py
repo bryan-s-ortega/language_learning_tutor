@@ -364,6 +364,13 @@ def send_telegram_message(
 def generate_task(gemini_key, task_type, user_doc_id, topic=None):
     user_state = get_firestore_state(user_doc_id)
     difficulty_level = user_state.get("difficulty_level", "advanced")
+    response_language = user_state.get("response_language", "English")
+    # Add language instruction for the model
+    language_instruction = (
+        f"\n\nIMPORTANT: The main learning objective (e.g., the word, idiom, phrasal verb, or topic) must always be in English. However, all other instructions, explanations, and feedback should be in {response_language}."
+        if response_language.lower() != "english"
+        else ""
+    )
     task_details_dict = {
         "type": task_type,
         "specific_item_tested": None,
@@ -387,6 +394,7 @@ def generate_task(gemini_key, task_type, user_doc_id, topic=None):
             "Then, on a NEW line, provide a single sentence containing this error for the user to correct. "
             "Example for ITEM: Past Simple Irregular Verb\nSentence: He goed to the park."
             + avoid_text
+            + language_instruction
         )
     elif task_type == "Vocabulary matching":
         recent_objectives = user_state.get("recent_vocabulary_matching", [])
@@ -409,7 +417,7 @@ def generate_task(gemini_key, task_type, user_doc_id, topic=None):
             "ITEM: word3\n\n"
             "A. definition for word2\n"
             "B. definition for word1\n"
-            "C. definition for word3" + avoid_text
+            "C. definition for word3" + avoid_text + language_instruction
         )
     elif task_type == "Idiom":
         recent_objectives = user_state.get("recent_idiom", [])
@@ -424,7 +432,9 @@ def generate_task(gemini_key, task_type, user_doc_id, topic=None):
             instruction_prefix + "Choose one common English idiom. "
             "On a NEW line, identify it clearly, like 'ITEM: [idiom]'. "
             "Then, on subsequent lines, explain its meaning and provide one clear example sentence. "
-            "Finally, ask the user to write their own sentence using it." + avoid_text
+            "Finally, ask the user to write their own sentence using it."
+            + avoid_text
+            + language_instruction
         )
     elif task_type == "Phrasal verb":
         recent_objectives = user_state.get("recent_phrasal_verb", [])
@@ -439,7 +449,9 @@ def generate_task(gemini_key, task_type, user_doc_id, topic=None):
             instruction_prefix + "Choose one common English phrasal verb. "
             "On a NEW line, identify it clearly, like 'ITEM: [phrasal verb]'. "
             "Then, on subsequent lines, explain its meaning and provide one clear example sentence. "
-            "Finally, ask the user to write their own sentence using it." + avoid_text
+            "Finally, ask the user to write their own sentence using it."
+            + avoid_text
+            + language_instruction
         )
     elif task_type == "Vocabulary":
         recent_objectives = user_state.get("recent_vocabulary", [])
@@ -457,6 +469,7 @@ def generate_task(gemini_key, task_type, user_doc_id, topic=None):
             "After listing all ITEMs, provide their definitions. "
             "Make it clear the user should try to use each word in a sentence."
             + avoid_text
+            + language_instruction
         )
     elif task_type == "Writing":
         recent_objectives = user_state.get("recent_writing", [])
@@ -471,7 +484,9 @@ def generate_task(gemini_key, task_type, user_doc_id, topic=None):
             instruction_prefix
             + "Ask the user a thoughtful, open-ended question that encourages them to write an extensive answer (at least 5 sentences). "
             "The question should be relevant to daily life, culture, or personal growth. "
-            "Make it clear that the user should write as much as possible." + avoid_text
+            "Make it clear that the user should write as much as possible."
+            + avoid_text
+            + language_instruction
         )
     elif task_type == "Word starting with letter":
         recent_objectives = user_state.get("recent_word_starting_with_letter", [])[-15:]
@@ -487,6 +502,7 @@ def generate_task(gemini_key, task_type, user_doc_id, topic=None):
             instruction_prefix
             + f"This is a fluency task. List as many English words as you can starting with the letter '{chosen_letter}' in one minute."
             + avoid_text
+            + language_instruction
         )
         task_details_dict["description"] = (
             f"This is a fluency task. List as many English words as you can starting with the letter '{chosen_letter}' in one minute."
@@ -500,7 +516,7 @@ def generate_task(gemini_key, task_type, user_doc_id, topic=None):
         prompt = (
             instruction_prefix
             + "Ask the user to record a voice message of any length. The instruction should be to talk about any topic they wish. Output only the instruction for the user."
-        )
+        ) + language_instruction
         logger.info(
             f"Generating free style voice task instruction with prompt: {prompt}"
         )
@@ -535,6 +551,7 @@ def generate_task(gemini_key, task_type, user_doc_id, topic=None):
             instruction_prefix
             + "Ask the user to record a voice message of any length. First, generate a specific topic for the user to talk about (the topic can be anything). Output only the instruction for the user, including the topic."
             + avoid_topics_text
+            + language_instruction
         )
         logger.info(f"Generating topic voice task instruction with prompt: {prompt}")
         genai.configure(api_key=gemini_key)

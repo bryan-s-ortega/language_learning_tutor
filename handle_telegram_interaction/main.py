@@ -203,6 +203,43 @@ def handle_difficulty(
     return "OK", 200
 
 
+def handle_language(
+    bot_token: str,
+    chat_id: str,
+    user_doc_id: str,
+    current_state: Dict[str, Any],
+    **kwargs,
+) -> str:
+    current_lang = current_state.get("response_language", "English")
+    language_options = [
+        ["English"],
+        ["Spanish"],
+        ["French"],
+        ["German"],
+        ["Chinese"],
+        ["Portuguese"],
+        ["Italian"],
+        ["Japanese"],
+        ["Korean"],
+        ["Russian"],
+    ]
+    lang_keyboard = {
+        "keyboard": language_options,
+        "one_time_keyboard": True,
+        "resize_keyboard": True,
+    }
+    send_telegram_message(
+        bot_token,
+        chat_id,
+        f"**Current response language:** {current_lang}\n\nChoose your preferred language for model responses:",
+        reply_markup=lang_keyboard,
+    )
+    update_firestore_state(
+        {"interaction_state": "awaiting_language_choice"}, user_doc_id=user_doc_id
+    )
+    return "OK", 200
+
+
 # --- Main Handler ---
 @functions_framework.http
 def handle_telegram_interaction(request) -> Any:
@@ -262,6 +299,7 @@ def handle_telegram_interaction(request) -> Any:
         "/help": handle_help,
         "/progress": handle_progress,
         "/difficulty": handle_difficulty,
+        "/language": handle_language,
     }
 
     # Handle commands
@@ -269,7 +307,7 @@ def handle_telegram_interaction(request) -> Any:
         handler = command_handlers[message_text.lower()]
         if message_text.lower() == "/difficulty":
             return handler(bot_token, chat_id, user_doc_id, current_state=current_state)
-        elif message_text.lower() in ["/start", "/progress"]:
+        elif message_text.lower() in ["/start", "/progress", "/language"]:
             return handler(bot_token, chat_id, user_doc_id)
         else:
             return handler(bot_token, chat_id)
@@ -352,6 +390,42 @@ def handle_telegram_interaction(request) -> Any:
                 bot_token,
                 chat_id,
                 "Please choose a valid difficulty: beginner, intermediate, or advanced.",
+            )
+        return "OK", 200
+
+    # Language selection
+    if interaction_state == "awaiting_language_choice":
+        if message_text.lower() in [
+            "english",
+            "spanish",
+            "french",
+            "german",
+            "chinese",
+            "portuguese",
+            "italian",
+            "japanese",
+            "korean",
+            "russian",
+        ]:
+            new_lang = message_text.lower()
+            update_firestore_state(
+                {
+                    "response_language": new_lang,
+                    "interaction_state": "idle",
+                },
+                user_doc_id=user_doc_id,
+            )
+            send_telegram_message(
+                bot_token,
+                chat_id,
+                f"✅ Language set to: {new_lang.capitalize()}!",
+                reply_markup={"remove_keyboard": True},
+            )
+        else:
+            send_user_error(
+                bot_token,
+                chat_id,
+                "Please choose a valid language from the list.",
             )
         return "OK", 200
 
