@@ -80,17 +80,14 @@ This project implements a sophisticated language learning system that:
 
 ### Available Commands
 
-| Command | Description | Admin Only |
-|---------|-------------|------------|
-| `/admin` | Show admin help | Yes |
-| `/adduser <chat_id>` | Add new user | Yes |
-| `/removeuser <chat_id>` | Remove user | Yes |
-| `/listusers` | List all users | Yes |
-| `/stats` | System statistics | Yes |
-| `/help` | Show user help | No |
-| `/progress` | Show learning progress | No |
-| `/difficulty` | Set your English learner difficulty (beginner, intermediate, advanced) | No |
-| `/language` | Select your preferred language for model responses | No |
+| Command         | Description                                                                                 |
+|----------------|---------------------------------------------------------------------------------------------|
+| `/start`       | Welcome message and bot introduction                                                        |
+| `/newtask`     | Start a new learning task                                                                   |
+| `/progress`    | View your learning progress                                                                 |
+| `/help`        | Show this help message                                                                      |
+| `/difficulty`  | Set your English learner difficulty (beginner, intermediate, advanced)                      |
+| `/language`    | Select your preferred language for model responses. The main learning objective is always in English, but all other instructions, explanations, and feedback will be in your chosen language. |
 
 ## Task Types & Difficulty
 

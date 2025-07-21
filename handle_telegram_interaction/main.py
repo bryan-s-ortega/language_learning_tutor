@@ -63,10 +63,15 @@ def handle_start(bot_token: str, chat_id: str, user_doc_id: str, **kwargs) -> st
 
 I'm your AI-powered English learning assistant. Here's how to get started:
 
+**Language Setting:**
+You can set your preferred language for model responses at any time using `/language`. The main learning objective (e.g., the word, idiom, or topic) will always be in English, but all other instructions, explanations, and feedback will be in your chosen language.
+
 **Available Commands:**
 • `/newtask` - Start a new learning task
 • `/progress` - View your learning progress
-• `/help` - Show this help message"""
+• `/help` - Show this help message
+• `/language` - Select your preferred language for model responses (main learning objective always in English)
+"""
 
         # Add admin commands section only for admins
         if is_admin:
@@ -124,7 +129,9 @@ def handle_help(bot_token: str, chat_id: str, **kwargs) -> str:
 • `/start` - Welcome message and bot introduction
 • `/newtask` - Start a new learning task
 • `/progress` - View your learning progress
-• `/help` - Show this help message"""
+• `/help` - Show this help message
+• `/language` - Select your preferred language for model responses (main learning objective always in English)
+"""
 
     # Add admin commands section only for admins
     if is_admin:
