@@ -30,13 +30,14 @@ This project implements a sophisticated language learning system that:
 ## 🚀 Features
 
 ### Core Learning Features
-- **8 Task Types**:
+- **9 Task Types**:
   - Error correction
   - Vocabulary matching
   - Idiom practice
   - Phrasal verb practice
   - Word fluency
-  - Voice recording analysis
+  - Freestyle voice recording
+  - Topic provided voice recording
   - Vocabulary
   - Writing
 - **Difficulty Setting**: Users can set their English learner level (beginner, intermediate, advanced) with `/difficulty`. Vocabulary tasks adapt to this setting.
@@ -46,6 +47,7 @@ This project implements a sophisticated language learning system that:
 
 ### Adaptive Learning System
 - **Personalized Tasks**: Ensures users always get new, unique learning content based on their own practice history.
+- **Language Selection**: Users can set their preferred language for model responses using `/language`. The main learning objective (e.g., the word, idiom, or topic) is always in English, but all other instructions, explanations, and feedback will be in the selected language. The default is English, but users can change this at any time.
 - **Progress Analytics**: Detailed reports with actionable recommendations
 
 ### Technical Features
@@ -88,6 +90,7 @@ This project implements a sophisticated language learning system that:
 | `/help` | Show user help | No |
 | `/progress` | Show learning progress | No |
 | `/difficulty` | Set your English learner difficulty (beginner, intermediate, advanced) | No |
+| `/language` | Select your preferred language for model responses | No |
 
 ## Task Types & Difficulty
 
