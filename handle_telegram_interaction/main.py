@@ -350,7 +350,7 @@ def handle_telegram_interaction(request) -> Any:
     if message_text is None:
         message_text = ""
 
-    # New task command
+    # New task command (always resets state, even in awaiting_language_choice)
     if message_text.lower() == "/newtask":
         reset_state_data = {
             "interaction_state": "awaiting_choice",
@@ -376,6 +376,10 @@ def handle_telegram_interaction(request) -> Any:
             )
         return "OK", 200
 
+    # Start command (always resets state)
+    if message_text.lower() == "/start":
+        return handle_start(bot_token, chat_id, user_doc_id)
+
     # Difficulty selection
     if interaction_state == "awaiting_difficulty_choice":
         if message_text.lower() in ["beginner", "intermediate", "advanced"]:
@@ -400,24 +404,30 @@ def handle_telegram_interaction(request) -> Any:
             )
         return "OK", 200
 
-    # Language selection
+    # Language selection (robust)
     if interaction_state == "awaiting_language_choice":
-        if message_text.lower() in [
-            "english",
-            "spanish",
-            "french",
-            "german",
-            "chinese",
-            "portuguese",
-            "italian",
-            "japanese",
-            "korean",
-            "russian",
-        ]:
-            new_lang = message_text.lower()
+        language_map = {
+            "english": ["english", "en", "1"],
+            "spanish": ["spanish", "espanol", "español", "es", "2"],
+            "french": ["french", "francais", "français", "fr", "3"],
+            "german": ["german", "deutsch", "de", "4"],
+            "chinese": ["chinese", "中文", "zh", "5"],
+            "portuguese": ["portuguese", "portugues", "português", "pt", "6"],
+            "italian": ["italian", "italiano", "it", "7"],
+            "japanese": ["japanese", "日本語", "ja", "8"],
+            "korean": ["korean", "한국어", "ko", "9"],
+            "russian": ["russian", "русский", "ru", "10"],
+        }
+        normalized = message_text.strip().lower()
+        selected_lang = None
+        for lang, variants in language_map.items():
+            if normalized in variants:
+                selected_lang = lang
+                break
+        if selected_lang:
             update_firestore_state(
                 {
-                    "response_language": new_lang,
+                    "response_language": selected_lang,
                     "interaction_state": "idle",
                 },
                 user_doc_id=user_doc_id,
@@ -425,14 +435,14 @@ def handle_telegram_interaction(request) -> Any:
             send_telegram_message(
                 bot_token,
                 chat_id,
-                f"✅ Language set to: {new_lang.capitalize()}!",
+                f"✅ Language set to: {selected_lang.capitalize()}!",
                 reply_markup={"remove_keyboard": True},
             )
         else:
             send_user_error(
                 bot_token,
                 chat_id,
-                "Please choose a valid language from the list.",
+                "Please choose a valid language from the list (number or name).",
             )
         return "OK", 200
 
