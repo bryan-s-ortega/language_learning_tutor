@@ -1,13 +1,10 @@
 const API_URL = '/api';
-let userId = localStorage.getItem('user_id');
-if (!userId) {
-    userId = 'user_' + Math.random().toString(36).substr(2, 9);
-    localStorage.setItem('user_id', userId);
-}
 
 // State Management
 const state = {
-    userId: userId,
+    userId: null,
+    userEmail: null,
+    userDisplayName: null,
     interactionState: 'idle',
     currentTask: null,
     theme: localStorage.getItem('theme') || 'light',
@@ -22,6 +19,14 @@ const state = {
 
 // DOM Elements
 const elements = {
+    authOverlay: document.getElementById('auth-overlay'),
+    authForm: document.getElementById('auth-form'),
+    authEmail: document.getElementById('auth-email'),
+    authPassword: document.getElementById('auth-password'),
+    authToggle: document.getElementById('auth-toggle'),
+    btnGoogle: document.getElementById('btn-google'),
+    btnEmailSignin: document.getElementById('btn-email-signin'),
+    
     sidebar: document.getElementById('sidebar'),
     sidebarOpen: document.getElementById('sidebar-open'),
     sidebarClose: document.getElementById('sidebar-close'),
@@ -48,33 +53,124 @@ const elements = {
     }
 };
 
-// Initialize
-document.addEventListener('DOMContentLoaded', () => {
+// --- Firebase Initialization ---
+let firebaseAuth = null;
+let isSigningUp = false;
+
+// Mock configuration - User will need to replace this with actual Firebase Config
+const firebaseConfig = {
+    apiKey: "YOUR_API_KEY",
+    authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+    projectId: "YOUR_PROJECT_ID",
+    storageBucket: "YOUR_PROJECT_ID.appspot.com",
+    messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+    appId: "YOUR_APP_ID"
+};
+
+// --- Secure Fetch Wrapper ---
+async function secureFetch(url, options = {}) {
+    const user = firebaseAuth.currentUser;
+    if (!user) {
+        throw new Error("User not authenticated");
+    }
+
+    const token = await user.getIdToken();
+    const headers = {
+        ...options.headers,
+        'Authorization': `Bearer ${token}`
+    };
+
+    return fetch(url, { ...options, headers });
+}
+
+// --- Initialization ---
+document.addEventListener('DOMContentLoaded', async () => {
     applyTheme(state.theme);
     setupEventListeners();
-    initApp();
+    initAuth();
 });
 
+function initAuth() {
+    const { initializeApp, getAuth } = window.firebaseDependencies;
+    const { 
+        onAuthStateChanged, 
+        GoogleAuthProvider, 
+        signInWithPopup, 
+        signInWithEmailAndPassword, 
+        createUserWithEmailAndPassword 
+    } = window.importFirebaseFunctions || {}; // Fallback if modules not exposed
+
+    // Note: In a real production app, we'd use a bundler. 
+    // Here we're using CDNs as defined in index.html.
+    // We'll dynamic import to ensure availability since we're using <script type="module">
+    
+    import("https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js").then((authModule) => {
+        const app = initializeApp(firebaseConfig);
+        firebaseAuth = getAuth(app);
+
+        authModule.onAuthStateChanged(firebaseAuth, (user) => {
+            if (user) {
+                console.log("User authenticated:", user.uid);
+                state.userId = user.uid;
+                state.userEmail = user.email;
+                state.userDisplayName = user.displayName;
+                elements.authOverlay.classList.add('hidden');
+                initApp();
+            } else {
+                console.log("No user authenticated.");
+                state.userId = null;
+                elements.authOverlay.classList.remove('hidden');
+            }
+        });
+
+        // Attach Login Actions
+        elements.btnGoogle.onclick = () => {
+            const provider = new authModule.GoogleAuthProvider();
+            authModule.signInWithPopup(firebaseAuth, provider).catch(err => alert(err.message));
+        };
+
+        elements.authForm.onsubmit = (e) => {
+            e.preventDefault();
+            const email = elements.authEmail.value;
+            const password = elements.authPassword.value;
+
+            if (isSigningUp) {
+                authModule.createUserWithEmailAndPassword(firebaseAuth, email, password)
+                    .catch(err => alert(err.message));
+            } else {
+                authModule.signInWithEmailAndPassword(firebaseAuth, email, password)
+                    .catch(err => alert(err.message));
+            }
+        };
+
+        elements.authToggle.onclick = (e) => {
+            e.preventDefault();
+            isSigningUp = !isSigningUp;
+            elements.btnEmailSignin.textContent = isSigningUp ? "Create Account" : "Sign In";
+            elements.authToggle.textContent = isSigningUp ? "Already have an account? Sign In" : "Don't have an account? Create one";
+        };
+
+    });
+}
+
 function initApp() {
-    // Show welcome if no history
     if (elements.chatArea.children.length <= 1) {
-        addBotMessage("👋 Hello! I'm your AI English Tutor. How can I help you learn today?");
+        addBotMessage(`👋 Welcome back, ${state.userDisplayName || 'Learner'}! I'm your AI English Tutor. Ready to practice?`);
     }
-    // Initial fetch of user state for gamification
     fetchUserState();
 }
 
 async function fetchUserState() {
     try {
-        const response = await fetch(`${API_URL}/proficiency?user_id=${state.userId}`);
+        const response = await secureFetch(`${API_URL}/state`);
         const data = await response.json();
-        // Since /api/proficiency doesn't return state yet, we might need another endpoint
-        // or just let the first interaction sync it.
-    } catch(e) { console.error(e); }
+        if (data.gamification) {
+            updateGamificationUI(data.gamification);
+        }
+    } catch(e) { console.error("Error fetching state:", e); }
 }
 
 function setupEventListeners() {
-    // Messaging
     elements.sendBtn.addEventListener('click', sendMessage);
     elements.messageInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
@@ -84,10 +180,8 @@ function setupEventListeners() {
     });
     elements.messageInput.addEventListener('input', autoResizeTextarea);
 
-    // Voice
     elements.recordBtn.addEventListener('click', toggleRecording);
 
-    // Sidebar & Navigation
     elements.sidebarOpen.addEventListener('click', () => toggleSidebar(true));
     elements.sidebarClose.addEventListener('click', () => toggleSidebar(false));
     elements.themeToggle.addEventListener('click', toggleTheme);
@@ -100,7 +194,6 @@ function setupEventListeners() {
     elements.navItems.progress.addEventListener('click', showProgress);
     elements.navItems.settings.addEventListener('click', showSettings);
 
-    // Overlay
     elements.closeOverlay.addEventListener('click', hideOverlay);
 }
 
@@ -109,10 +202,9 @@ function setupEventListeners() {
 async function showTaskSelection() {
     setLoading(true);
     try {
-        const response = await fetch(`${API_URL}/newtask`, {
+        const response = await secureFetch(`${API_URL}/newtask`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ user_id: state.userId })
+            headers: { 'Content-Type': 'application/json' }
         });
         const data = await response.json();
         
@@ -133,10 +225,10 @@ async function selectTask(taskType) {
     setLoading(true);
     elements.currentTaskName.textContent = taskType;
     try {
-        const response = await fetch(`${API_URL}/select_task`, {
+        const response = await secureFetch(`${API_URL}/select_task`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ user_id: state.userId, task_type: taskType })
+            body: JSON.stringify({ task_type: taskType })
         });
         const data = await response.json();
         if (data.message) {
@@ -154,7 +246,7 @@ async function selectTask(taskType) {
 async function showProgress() {
     setLoading(true);
     try {
-        const response = await fetch(`${API_URL}/proficiency?user_id=${state.userId}`);
+        const response = await secureFetch(`${API_URL}/proficiency`);
         const data = await response.json();
         state.proficiencyData = data;
         
@@ -188,10 +280,9 @@ async function sendMessage() {
 
     try {
         const formData = new FormData();
-        formData.append('user_id', state.userId);
         formData.append('message', text);
 
-        const response = await fetch(`${API_URL}/chat`, {
+        const response = await secureFetch(`${API_URL}/chat`, {
             method: 'POST',
             body: formData
         });
@@ -206,9 +297,12 @@ async function sendMessage() {
 }
 
 function handleBotResponse(data) {
-    if (data.message) {
-        addBotMessage(data.message, data.tutor_notes);
+    if (data.chat_response) {
+        addBotMessage(data.chat_response, data.tutor_notes);
+    } else if (data.message) {
+        addBotMessage(data.message);
     }
+    
     if (data.gamification) {
         updateGamificationUI(data.gamification);
     }
@@ -221,7 +315,6 @@ function updateGamificationUI(stats) {
     elements.stats.streak.textContent = state.streak;
     elements.stats.xp.textContent = `${state.xp} XP`;
     
-    // XP Bar logic: e.g. level up every 100 XP
     const xpInLevel = state.xp % 100;
     elements.stats.xpBar.style.width = `${xpInLevel}%`;
 }
@@ -244,7 +337,6 @@ function createMessageElement(text, sender, tutorNotes = []) {
     const div = document.createElement('div');
     div.className = `message ${sender}`;
     
-    // Simple Markdown-ish parsing
     let formattedText = text
         .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
         .replace(/\n/g, '<br>');
@@ -345,10 +437,9 @@ async function sendVoiceMessage(audioBlob) {
 
     try {
         const formData = new FormData();
-        formData.append('user_id', state.userId);
         formData.append('voice', audioBlob, 'voice.ogg');
 
-        const response = await fetch(`${API_URL}/chat`, {
+        const response = await secureFetch(`${API_URL}/chat`, {
             method: 'POST',
             body: formData
         });
@@ -375,14 +466,9 @@ function renderProgressOverlay(data) {
                 <h3>Proficiency by Category</h3>
                 <canvas id="proficiencyChart"></canvas>
             </div>
-            
-            <div class="stats-summary" id="stats-summary">
-                <!-- Summary cards could go here -->
-            </div>
         </div>
     `;
 
-    // Initialize Chart.js
     setTimeout(() => {
         const ctx = document.getElementById('proficiencyChart').getContext('2d');
         const categories = Object.keys(data);
@@ -400,9 +486,9 @@ function renderProgressOverlay(data) {
                 datasets: [{
                     label: 'Mastery %',
                     data: masteryLevels,
-                    backgroundColor: 'rgba(37, 99, 235, 0.2)',
-                    borderColor: 'rgba(37, 99, 235, 1)',
-                    pointBackgroundColor: 'rgba(37, 99, 235, 1)',
+                    backgroundColor: 'rgba(99, 102, 241, 0.2)',
+                    borderColor: 'rgba(99, 102, 241, 1)',
+                    pointBackgroundColor: 'rgba(99, 102, 241, 1)',
                     borderWidth: 2
                 }]
             },
@@ -445,6 +531,11 @@ function renderSettingsOverlay() {
                     <div class="option-card" data-key="difficulty_level" data-val="advanced" onclick="updateConfigFromEl(this)">Advanced</div>
                 </div>
             </div>
+
+            <button class="btn-auth" style="margin-top:32px; color:#ef4444;" onclick="logout()">
+                <i class="fas fa-sign-out-alt"></i>
+                <span>Sign Out</span>
+            </button>
         </div>
     `;
 }
@@ -457,10 +548,10 @@ async function updateConfigFromEl(el) {
 
 async function updateConfig(config) {
     try {
-        const response = await fetch(`${API_URL}/config`, {
+        const response = await secureFetch(`${API_URL}/config`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ user_id: state.userId, ...config })
+            body: JSON.stringify(config)
         });
         const data = await response.json();
         alert(data.message || "Settings updated!");
@@ -468,6 +559,15 @@ async function updateConfig(config) {
     } catch (e) {
         console.error(e);
     }
+}
+
+function logout() {
+    import("https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js").then(m => {
+        m.signOut(firebaseAuth).then(() => {
+            clearChat();
+            hideOverlay();
+        });
+    });
 }
 
 // --- Utilities ---
