@@ -2,8 +2,8 @@ import functions_framework
 import requests
 from datetime import datetime
 from typing import Any, Dict
-from config import config
-from utils import (
+from .config import config
+from .utils import (
     access_secret_version,
     send_telegram_message,
     update_firestore_state,

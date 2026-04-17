@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Language Learning Tutor</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+        <aside class="sidebar">
+            <div class="logo">
+                <i class="fas fa-graduation-cap"></i> AI Tutor
+            </div>
+            <nav>
+                <div class="nav-item active" id="nav-chat">
+                    <i class="fas fa-comments"></i> Chat
+                </div>
+                <div class="nav-item" id="nav-new-task">
+                    <i class="fas fa-plus-circle"></i> New Task
+                </div>
+                <div class="nav-item" id="nav-progress">
+                    <i class="fas fa-chart-line"></i> Progress
+                </div>
+                <div class="nav-item" id="nav-settings">
+                    <i class="fas fa-cog"></i> Settings
+                </div>
+            </nav>
+        </aside>
+        
+        <main class="main-content">
+            <div class="chat-area" id="chat-area">
+                <!-- Messages will appear here -->
+            </div>
+            
+            <div class="input-area">
+                <button class="btn-icon btn-record" id="record-btn" title="Record Voice">
+                    <i class="fas fa-microphone"></i>
+                </button>
+                <input type="text" id="message-input" placeholder="Type your answer..." autocomplete="off">
+                <button class="btn-primary" id="send-btn">
+                    <i class="fas fa-paper-plane"></i> Send
+                </button>
+            </div>
+        </main>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

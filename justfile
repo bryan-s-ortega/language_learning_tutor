@@ -58,4 +58,9 @@ urls:
 # Show function logs
 logs-telegram:
     echo "Showing logs for handle_telegram_interaction..."
-    gcloud functions logs read handle-telegram-interaction --limit=50
+    gcloud functions logs read handle-telegram-interaction --limit=1
+
+delete-telegram:
+	echo "Deleting handle_telegram_interaction function..."
+	gcloud functions delete handle-telegram-interaction --region={{region}} --project={{project-id}} --quiet
+	echo "Function deleted."

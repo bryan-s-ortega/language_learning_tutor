@@ -4,7 +4,7 @@ import requests
 import logging
 import datetime
 from typing import Optional, Dict, Any, List
-from config import config
+from .config import config
 import re
 import google.generativeai as genai
 
