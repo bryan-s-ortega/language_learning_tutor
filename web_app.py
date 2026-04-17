@@ -142,7 +142,7 @@ async def get_proficiency(user_id: str):
         # Actually core_logic.py TutorService has handle_progress but it returns a report.
         # Let's check if there is a get_user_proficiency in TutorService (it exists in core_logic but not in TutorService class)
         # Wait, core_logic.py has get_user_proficiency imported from utils.
-        from handle_telegram_interaction.utils import get_user_proficiency
+        from app_core.utils import get_user_proficiency
 
         data = get_user_proficiency(user_id)
         return data

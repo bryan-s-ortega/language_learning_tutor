@@ -18,7 +18,6 @@ class DatabaseConfig:
 
 @dataclass
 class SecretConfig:
-    telegram_token_secret_id: str = "telegram-bot"
     gemini_api_key_secret_id: str = "gemini-api"
     authorized_users_secret_id: str = "authorized-users"
     admin_users_secret_id: str = "admin-users"
@@ -96,7 +95,6 @@ class Config:
 config = Config()
 
 PROJECT_ID = config.database.project_id
-TELEGRAM_TOKEN_SECRET_ID = config.secrets.telegram_token_secret_id
 GEMINI_API_KEY_SECRET_ID = config.secrets.gemini_api_key_secret_id
 AUTHORIZED_USERS_SECRET_ID = config.secrets.authorized_users_secret_id
 ADMIN_USERS_SECRET_ID = config.secrets.admin_users_secret_id

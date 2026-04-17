@@ -1,7 +1,7 @@
 [project]
 name = "language-learning-tutor"
 version = "0.1.0"
-description = "AI-Powered English Learning Assistant with Telegram Bot Integration"
+description = "AI-Powered English Learning Assistant with Modern Web UI"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -34,8 +34,7 @@ python_functions = ["test_*"]
 addopts = [
     "--strict-markers",
     "--strict-config",
-    "--cov=handle_telegram_interaction",
-    "--cov=send_daily_choice_request",
+    "--cov=app_core",
     "--cov-report=term-missing",
     "--cov-report=html",
 ]

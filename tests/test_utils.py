@@ -9,14 +9,7 @@ with (
     patch("google.cloud.speech.SpeechClient"),
 ):
     # Import the functions to test
-    import sys
-    import os
-
-    sys.path.append(
-        os.path.join(os.path.dirname(__file__), "..", "handle_telegram_interaction")
-    )
-
-    from utils import (
+    from app_core.utils import (
         is_user_authorized,
         is_admin_user,
         check_rate_limit,
@@ -25,7 +18,6 @@ with (
         get_firestore_state,
         update_firestore_state,
         access_secret_version,
-        send_telegram_message,
         add_user_to_whitelist,
         remove_user_from_whitelist,
         get_user_proficiency,
@@ -38,7 +30,7 @@ with (
 class TestAuthentication:
     """Test authentication and user management functions"""
 
-    @patch("utils.access_secret_version")
+    @patch("app_core.utils.access_secret_version")
     def test_is_user_authorized(self, mock_access_secret):
         # Test with authorized user
         mock_access_secret.return_value = "123456\n789012"
@@ -47,7 +39,7 @@ class TestAuthentication:
         # Test with unauthorized user
         assert not is_user_authorized("999999")
 
-    @patch("utils.access_secret_version")
+    @patch("app_core.utils.access_secret_version")
     def test_is_admin_user(self, mock_access_secret):
         # Test with admin user
         mock_access_secret.return_value = "123456\n789012"
@@ -60,7 +52,7 @@ class TestAuthentication:
 class TestRateLimiting:
     """Test rate limiting functionality"""
 
-    @patch("utils.get_firestore_client")
+    @patch("app_core.utils.get_firestore_client")
     def test_check_rate_limit_new_user(self, mock_get_firestore_client):
         # Mock Firestore operations
         mock_db = Mock()
@@ -72,7 +64,7 @@ class TestRateLimiting:
         # New user should be allowed
         assert check_rate_limit("new_user")
 
-    @patch("utils.get_firestore_client")
+    @patch("app_core.utils.get_firestore_client")
     def test_check_rate_limit_exceeded(self, mock_get_firestore_client):
         # Mock existing user with recent requests
         mock_db = Mock()
@@ -103,8 +95,8 @@ class TestRateLimiting:
 class TestTaskGeneration:
     """Test task generation functionality"""
 
-    @patch("utils.get_user_proficiency")
-    @patch("utils.genai")
+    @patch("app_core.utils.get_user_proficiency")
+    @patch("app_core.utils.genai")
     def test_generate_task_error_correction(self, mock_genai, mock_proficiency):
         # Mock user proficiency data
         mock_proficiency.return_value = {
@@ -131,9 +123,9 @@ class TestTaskGeneration:
         assert result["description"] is not None
         assert result["specific_item_tested"] == "Subject-Verb Agreement"
 
-    @patch("utils.get_user_proficiency")
-    @patch("utils.get_firestore_state")
-    @patch("utils.genai")
+    @patch("app_core.utils.get_user_proficiency")
+    @patch("app_core.utils.get_firestore_state")
+    @patch("app_core.utils.genai")
     def test_generate_task_vocabulary_matching(
         self, mock_genai, mock_firestore_state, mock_proficiency
     ):
@@ -175,8 +167,8 @@ C. the quality of being determined and not giving up"""
             "tenacity",
         ]
 
-    @patch("utils.get_user_proficiency")
-    @patch("utils.genai")
+    @patch("app_core.utils.get_user_proficiency")
+    @patch("app_core.utils.genai")
     def test_evaluate_answer_vocabulary_matching(self, mock_genai, mock_proficiency):
         # Mock user proficiency data
         mock_proficiency.return_value = {}
@@ -245,7 +237,7 @@ class TestTaskTypes:
 
     def test_task_types_defined(self):
         """Ensure all expected task types are defined"""
-        from config import config
+        from app_core.config import config
 
         expected_types = [
             "Error correction",
@@ -279,8 +271,8 @@ class TestTaskTypes:
         "Writing",
     ],
 )
-@patch("utils.get_user_proficiency")
-@patch("utils.genai")
+@patch("app_core.utils.get_user_proficiency")
+@patch("app_core.utils.genai")
 def test_generate_task_all_types(mock_genai, mock_proficiency, task_type):
     mock_proficiency.return_value = {}
     mock_model = Mock()
@@ -291,7 +283,7 @@ def test_generate_task_all_types(mock_genai, mock_proficiency, task_type):
     assert result["description"] is not None
 
 
-@patch("utils.get_firestore_client")
+@patch("app_core.utils.get_firestore_client")
 def test_get_firestore_state_and_update(mock_get_firestore_client):
     mock_db = Mock()
     mock_doc = Mock()
@@ -306,7 +298,7 @@ def test_get_firestore_state_and_update(mock_get_firestore_client):
     assert update_firestore_state({"foo": "baz"}, "user1")
 
 
-@patch("utils.get_secret_client")
+@patch("app_core.utils.get_secret_client")
 def test_access_secret_version(mock_get_secret_client):
     mock_client = Mock()
     mock_response = Mock()
@@ -316,31 +308,17 @@ def test_access_secret_version(mock_get_secret_client):
     assert access_secret_version("my-secret") == "secret-value"
 
 
-@patch("utils.requests.post")
-def test_send_telegram_message_success(mock_post):
-    mock_post.return_value.json.return_value = {"ok": True}
-    mock_post.return_value.raise_for_status.return_value = None
-    assert send_telegram_message("token", "chat", "text")
-
-
-@patch("utils.requests.post")
-def test_send_telegram_message_failure(mock_post):
-    mock_post.return_value.json.return_value = {"ok": False, "description": "fail"}
-    mock_post.return_value.raise_for_status.return_value = None
-    assert not send_telegram_message("token", "chat", "text")
-
-
-@patch("utils.get_secret_client")
+@patch("app_core.utils.get_secret_client")
 def test_add_and_remove_user_to_whitelist(mock_get_secret_client):
     mock_client = Mock()
     mock_get_secret_client.return_value = mock_client
     # Patch _get_users_from_secret to simulate current users
-    with patch("utils._get_users_from_secret", return_value=["123"]):
+    with patch("app_core.utils._get_users_from_secret", return_value=["123"]):
         assert add_user_to_whitelist("456")
         assert remove_user_from_whitelist("123")
 
 
-@patch("utils.get_firestore_client")
+@patch("app_core.utils.get_firestore_client")
 def test_get_user_proficiency_and_update(mock_get_firestore_client):
     mock_db = Mock()
     mock_doc = Mock()
@@ -350,25 +328,15 @@ def test_get_user_proficiency_and_update(mock_get_firestore_client):
     mock_get_firestore_client.return_value = mock_db
     assert get_user_proficiency("user1") == {"foo": "bar"}
     # update_user_proficiency is more complex, but we can check it doesn't crash
-    with patch("utils.get_firestore_server_timestamp", return_value="now"):
+    with patch("app_core.utils.get_firestore_server_timestamp", return_value="now"):
         assert update_user_proficiency("user1", "grammar_topics", "Past Simple", True)
 
 
-@patch("utils.requests.get")
-@patch("utils.genai")
-def test_transcribe_voice(mock_genai, mock_requests):
-    # Mock Telegram file download
-    mock_requests.side_effect = [
-        Mock(
-            status_code=200,
-            json=lambda: {"result": {"file_path": "voice.ogg"}},
-            raise_for_status=lambda: None,
-        ),
-        Mock(status_code=200, content=b"audio-bytes", raise_for_status=lambda: None),
-    ]
+@patch("app_core.utils.genai")
+def test_transcribe_voice(mock_genai):
     # Mock Gemini response
     mock_model = Mock()
     mock_model.generate_content.return_value.text = "transcribed text"
     mock_genai.GenerativeModel.return_value = mock_model
-    result = transcribe_voice("token", "file_id", gemini_key="fake_key")
+    result = transcribe_voice(b"audio-bytes", gemini_key="fake_key")
     assert result == "transcribed text"

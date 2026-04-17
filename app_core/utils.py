@@ -65,10 +65,6 @@ class FirestoreError(LanguageLearningError):
     pass
 
 
-class TelegramAPIError(LanguageLearningError):
-    pass
-
-
 class GeminiAPIError(LanguageLearningError):
     pass
 
@@ -85,7 +81,6 @@ def access_secret_version(secret_id: str, version_id: str = "latest") -> str:
     # Fallback to environment variables for local development
     env_map = {
         config.secrets.gemini_api_key_secret_id: "GEMINI_API_KEY",
-        config.secrets.telegram_token_secret_id: "TELEGRAM_BOT_TOKEN",
         config.secrets.authorized_users_secret_id: "AUTHORIZED_USERS",
         config.secrets.admin_users_secret_id: "ADMIN_USERS",
     }
@@ -331,50 +326,6 @@ def check_rate_limit(
         )
         # In case of error, allow the request to proceed
         return True
-
-
-# --- Telegram API Helpers ---
-def send_telegram_message(
-    bot_token: str, chat_id: str, text: str, reply_markup: Optional[Dict] = None
-) -> bool:
-    """
-    Send a message via Telegram Bot API.
-
-    Args:
-        bot_token: The bot token
-        chat_id: The chat ID to send message to
-        text: The message text
-        reply_markup: Optional reply markup for keyboard
-
-    Returns:
-        True if successful, False otherwise
-    """
-    try:
-        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-        payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
-
-        if reply_markup:
-            payload["reply_markup"] = json.dumps(reply_markup)
-
-        response = requests.post(url, json=payload, timeout=10)
-        response.raise_for_status()
-
-        result = response.json()
-        if result.get("ok"):
-            logger.debug(f"Telegram message sent successfully to {chat_id}")
-            return True
-        else:
-            logger.error(
-                f"Telegram API error: {result.get('description', 'Unknown error')}"
-            )
-            return False
-
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Network error sending Telegram message: {e}", exc_info=True)
-        return False
-    except Exception as e:
-        logger.error(f"Error sending Telegram message: {e}", exc_info=True)
-        return False
 
 
 # --- Helper: Generate Task via Gemini ---
@@ -858,45 +809,6 @@ def evaluate_answer(
         }
 
 
-# --- Helper: Send Choice Request Message ---
-def send_choice_request_message(bot_token, chat_id, user_doc_id):
-    logger.info(f"Attempting to send choice request message to {chat_id}")
-    try:
-        task_types = config.tasks.task_types
-        keyboard_buttons = [[task_type] for task_type in task_types]
-        reply_markup = {
-            "keyboard": keyboard_buttons,
-            "one_time_keyboard": True,
-            "resize_keyboard": True,
-        }
-
-        # Build a numbered menu
-        numbered_menu = "\n".join(
-            [f"{i + 1}. {task_type}" for i, task_type in enumerate(task_types)]
-        )
-        message_text = (
-            "👋 Okay, let's start a new task! What type of English practice would you like?\n"
-            "You can reply with the *number* of the task or tap a button below.\n\n"
-            f"{numbered_menu}"
-        )
-
-        # Add adaptive learning suggestions if user_doc_id is provided
-        # (Optional: can be removed if old logic is not wanted)
-
-        success = send_telegram_message(bot_token, chat_id, message_text, reply_markup)
-        if success:
-            logger.info("Choice request message sent successfully.")
-            return True
-        else:
-            logger.error("Failed to send choice request message via Telegram helper.")
-            return False
-    except Exception as e:
-        logger.error(
-            f"Error within send_choice_request_message helper: {e}", exc_info=True
-        )
-        return False
-
-
 # --- Helper: Get User Proficiency ---
 def get_user_proficiency(user_doc_id):
     try:
@@ -1156,28 +1068,14 @@ def update_user_proficiency(
 
 
 # --- Helper: Transcribe Voice using Gemini Multi-Modal ---
-def transcribe_voice(bot_token, file_id, gemini_key=None):
+def transcribe_voice(audio_content, gemini_key=None):
+    """
+    Transcribe audio content using Gemini's multi-modal capabilities.
+    """
     try:
-        get_file_url = (
-            f"https://api.telegram.org/bot{bot_token}/getFile?file_id={file_id}"
-        )
-        res_file_path = requests.get(get_file_url, timeout=10)
-        res_file_path.raise_for_status()
-        file_path = res_file_path.json().get("result", {}).get("file_path")
-        if not file_path:
-            logger.error(
-                "Error: Could not get file_path from Telegram for transcription"
-            )
+        if not audio_content:
+            logger.error("No audio content provided for transcription")
             return None
-
-        file_download_url = f"https://api.telegram.org/file/bot{bot_token}/{file_path}"
-        logger.info(f"Downloading audio from: {file_download_url}")
-        res_audio = requests.get(
-            file_download_url, timeout=30
-        )  # Increased timeout for longer audio
-        res_audio.raise_for_status()
-        audio_content = res_audio.content
-        logger.info(f"Audio downloaded, size: {len(audio_content)} bytes")
 
         # Use Gemini multi-modal for audio transcription
         if gemini_key:
@@ -1207,12 +1105,6 @@ def transcribe_voice(bot_token, file_id, gemini_key=None):
             logger.error("No Gemini API key provided for transcription")
             return None
 
-    except requests.exceptions.RequestException as req_err:
-        logger.error(
-            f"Error inside transcribe_voice (Telegram Download): {req_err}",
-            exc_info=True,
-        )
-        return None
     except Exception as e:
         logger.error(
             f"Error inside transcribe_voice (Gemini Transcription): {e}", exc_info=True

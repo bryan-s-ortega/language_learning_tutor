@@ -1,8 +1,8 @@
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from handle_telegram_interaction.config import config
-from handle_telegram_interaction.utils import (
+from app_core.config import config
+from app_core.utils import (
     access_secret_version,
     update_firestore_state,
     get_firestore_state,

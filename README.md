@@ -1,101 +1,59 @@
-# Language Learning Tutor - AI-Powered English Learning Assistant
+# Language Learning Tutor - Premium AI English Assistant
 
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![Google Cloud Functions](https://img.shields.io/badge/Google%20Cloud-Functions-orange.svg)](https://cloud.google.com/functions)
-[![Telegram Bot](https://img.shields.io/badge/Telegram-Bot-blue.svg)](https://core.telegram.org/bots)
+[![FastAPI](https://img.shields.io/badge/FastAPI-Modern-green.svg)](https://fastapi.tiangolo.com/)
+[![Google Gemini AI](https://img.shields.io/badge/Google%20Gemini-AI-orange.svg)](https://deepmind.google/technologies/gemini/)
 
-An intelligent, adaptive English learning tutor built with Google Cloud Functions, Telegram Bot API, and AI-powered task generation. The system provides personalized learning experiences through adaptive algorithms, spaced repetition, and comprehensive progress tracking.
+A premium, AI-powered English learning application with a modern minimalist web interface. Engage in hybrid learning through structured tasks or free-form conversation, all while tracking your progress with a gamified experience.
 
 ## 🚀 Quick Start
 
-### Usage
-
-1. **Start Learning**: Use `/start` to start interacting with the bot.
-2. **Set language**: Use `/language` to choose language of responses.
-3. **Set Difficulty**: Use `/difficulty` to choose your English learner level (beginner, intermediate, advanced).
-4. **Practice**: Send `/newtask` to your Telegram bot to start learning and receive personalized feedback.
-5. **Check Progress**: Use `/progress` to see your learning statistics.
+### Installation & Development
+1. **Setup**: Use `uv` to install dependencies.
+   ```bash
+   uv sync
+   ```
+2. **Environment**: Export your API keys.
+   ```bash
+   export GEMINI_API_KEY="your-key"
+   export GCP_PROJECT_ID="your-project"
+   ```
+3. **Run**: Start the development server.
+   ```bash
+   just run-web
+   ```
 
 ## 🎯 Overview
 
-This project implements a sophisticated language learning system that:
+This application provides a state-of-the-art language learning experience featuring:
 
-- **🤖 AI-Powered Task Generation**: Uses Google's Gemini AI to create engaging, personalized English learning tasks
-- **📱 Telegram Integration**: Delivers learning content through an intuitive Telegram bot interface
-- **🧠 Adaptive Learning**: Avoids repeating previously practiced main learning objectives for each task type, using user history
-- **📊 Progress Tracking**: Comprehensive analytics and progress reporting
-- **🎙️ Voice Analysis**: Supports voice recording analysis for pronunciation practice
-- **☁️ Cloud-Native**: Built on Google Cloud Functions for scalability and reliability
+- **🤖 Hybrid Learning**: Toggle between structured learning tasks and free-form conversation mode.
+- **✨ Premium Web UI**: A minimalist, chat-centric interface with dark/light mode and glassmorphism.
+- **🎮 Gamification Engine**: Daily streaks, XP tracking, and progress visualization.
+- **🎙️ Multi-modal Feedback**: Record voice messages for pronunciation analysis or type your responses.
+- **🧠 Adaptive SRS**: Spaced Repetition System that identifies your weak areas and reinforces them during conversation.
+- **📊 Proficiency Analytics**: Visualize your mastery across grammar, vocabulary, and phrasal verbs with interactive charts.
 
-## 🚀 Features
+## 🚀 Key Features
 
-### Core Learning Features
-- **9 Task Types**:
-  - Error correction
-  - Vocabulary matching
-  - Idiom practice
-  - Phrasal verb practice
-  - Word fluency
-  - Freestyle voice recording
-  - Topic provided voice recording
-  - Vocabulary
-  - Writing
-- **Difficulty Setting**: Users can set their English learner level (beginner, intermediate, advanced) with `/difficulty`. Vocabulary tasks adapt to this setting.
-- **Real-time Feedback**: Instant AI-powered evaluation and personalized feedback.
-- **Voice Support**: Multimodal llm for handling voice recordings.
+### Learning Modes
+- **9 Structured Tasks**:
+  - Error correction, Vocabulary matching, Idioms, Phrasal verbs, Writing, and more.
+- **Free-form Conversation**: 
+  - Chat naturally with the AI tutor. It provides separate "Tutor Notes" for corrections without breaking your flow.
+  - **Adjustable Sensitivity**: Choose between Casual, Standard, or Strict correction thresholds.
 
-### Adaptive Learning System
-- **Personalized Tasks**: Ensures users always get new, unique learning content based on their own practice history.
-- **Language Selection**: Users can set their preferred language for model responses using `/language`. The main learning objective (e.g., the word, idiom, or topic) is always in English, but all other instructions, explanations, and feedback will be in the selected language. The default is English, but users can change this at any time.
-- **Progress Analytics**: Detailed reports with actionable recommendations
+### Technical Stack
+- **Backend**: FastAPI & Python 3.12+
+- **Frontend**: Vanilla JS, CSS, and HTML with Chart.js
+- **Database**: Google Firestore
+- **AI Engine**: Google Gemini (Pro & Flash) for generation, evaluation, and transcription.
 
-### Technical Features
-- **Serverless Architecture**: Google Cloud Functions for automatic scaling
-- **Secure Secrets Management**: Google Secret Manager for API keys and tokens
-- **NoSQL Database**: Firestore for user data and progress tracking
-- **AI Integration**: Google Gemini for intelligent content generation
-- **Voice Processing**: Google multimodal llm for audio analysis
+## 🛠️ Project Structure
+- `app_core/`: Central logic for AI interactions, database management, and utilities.
+- `static/`: Frontend assets (styles, scripts, and views).
+- `web_app.py`: FastAPI server implementation.
+- `core_logic.py`: Main service layer bridging the UI and the engine.
 
-## 🛠️ Technology Stack
-
-### Backend & Cloud Services
-- **Google Cloud Functions**: Serverless compute platform
-- **Google Firestore**: NoSQL database for user data
-- **Google Secret Manager**: Secure secrets and API key management
-- **Google Speech-to-Text**: Voice transcription service
-- **Google Gemini AI**: Advanced AI for task generation and evaluation
-
-### APIs & Integrations
-- **Telegram Bot API**: User interface and interaction
-- **Functions Framework**: Python runtime for Cloud Functions
-- **Requests**: HTTP client for API calls
-
-### Development Tools
-- **Python 3.12+**: Primary programming language
-- **Google Cloud CLI**: Deployment and management
-- **UV**: Fast Python package manager
-
-## Admin Commands
-
-### Available Commands
-
-| Command         | Description                                                                                 |
-|----------------|---------------------------------------------------------------------------------------------|
-| `/start`       | Welcome message and bot introduction                                                        |
-| `/newtask`     | Start a new learning task                                                                   |
-| `/progress`    | View your learning progress                                                                 |
-| `/help`        | Show this help message                                                                      |
-| `/difficulty`  | Set your English learner difficulty (beginner, intermediate, advanced)                      |
-| `/language`    | Select your preferred language for model responses. The main learning objective is always in English, but all other instructions, explanations, and feedback will be in your chosen language. |
-
-## Task Types & Difficulty
-
-- **Error correction**: Fix grammatical errors in sentences
-- **Vocabulary matching**: Match words with their definitions
-- **Idiom practice**: Learn and practice English idioms
-- **Phrasal verb practice**: Learn and practice English phrasal verbs
-- **Word fluency**: Generate words starting with specific letters
-- **Freestyle voice recording**: Practice pronunciation with any topic
-- **Topic voice recording**: Practice pronunciation with a provided topic
-- **Vocabulary**: Learn 5 words and use them in sentences
-- **Writing**: Answer a thoughtful, open-ended question
+---
+*Built with ❤️ for language learners.*
