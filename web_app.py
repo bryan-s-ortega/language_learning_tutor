@@ -134,5 +134,22 @@ async def get_state(user_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/proficiency")
+async def get_proficiency(user_id: str):
+    """Get user proficiency raw data for charts."""
+    try:
+        # Assuming handle_progress or a similar method returns raw data if requested
+        # Actually core_logic.py TutorService has handle_progress but it returns a report.
+        # Let's check if there is a get_user_proficiency in TutorService (it exists in core_logic but not in TutorService class)
+        # Wait, core_logic.py has get_user_proficiency imported from utils.
+        from handle_telegram_interaction.utils import get_user_proficiency
+
+        data = get_user_proficiency(user_id)
+        return data
+    except Exception as e:
+        logger.error(f"Error in get_proficiency: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # Mount static files (Frontend)
 app.mount("/", StaticFiles(directory="static", html=True), name="static")

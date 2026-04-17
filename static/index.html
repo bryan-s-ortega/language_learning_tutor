@@ -3,48 +3,127 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Language Learning Tutor</title>
+    <title>AI English Tutor | Minimalist Practice</title>
+    <meta name="description" content="A premium, AI-powered English learning assistant.">
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@600;700&display=swap" rel="stylesheet">
+    
+    <!-- Icons & Charts -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
     <link rel="stylesheet" href="style.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 </head>
-<body>
-    <div class="app-container">
-        <aside class="sidebar">
-            <div class="logo">
-                <i class="fas fa-graduation-cap"></i> AI Tutor
-            </div>
-            <nav>
-                <div class="nav-item active" id="nav-chat">
-                    <i class="fas fa-comments"></i> Chat
+<body class="theme-light">
+    <div class="app-wrapper">
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar" role="navigation">
+            <div class="sidebar-header">
+                <div class="logo-container">
+                    <img src="logo.svg" alt="AI Tutor Logo" class="app-logo">
+                    <span class="app-name">AI Tutor</span>
                 </div>
-                <div class="nav-item" id="nav-new-task">
-                    <i class="fas fa-plus-circle"></i> New Task
-                </div>
-                <div class="nav-item" id="nav-progress">
-                    <i class="fas fa-chart-line"></i> Progress
-                </div>
-                <div class="nav-item" id="nav-settings">
-                    <i class="fas fa-cog"></i> Settings
-                </div>
-            </nav>
-        </aside>
-        
-        <main class="main-content">
-            <div class="chat-area" id="chat-area">
-                <!-- Messages will appear here -->
+                <button class="btn-icon sidebar-toggle" id="sidebar-close" aria-label="Close sidebar">
+                    <i class="fas fa-bars"></i>
+                </button>
             </div>
             
-            <div class="input-area">
-                <button class="btn-icon btn-record" id="record-btn" title="Record Voice">
-                    <i class="fas fa-microphone"></i>
+            <nav class="sidebar-nav">
+                <button class="nav-item active" id="nav-chat" title="Start a new conversation">
+                    <i class="fas fa-plus"></i>
+                    <span>New Practice</span>
                 </button>
-                <input type="text" id="message-input" placeholder="Type your answer..." autocomplete="off">
-                <button class="btn-primary" id="send-btn">
-                    <i class="fas fa-paper-plane"></i> Send
+                <div class="nav-divider"></div>
+                <button class="nav-item" id="nav-new-task">
+                    <i class="fas fa-graduation-cap"></i>
+                    <span>Choose Task</span>
+                </button>
+                <button class="nav-item" id="nav-progress">
+                    <i class="fas fa-chart-line"></i>
+                    <span>My Progress</span>
+                </button>
+                <button class="nav-item" id="nav-settings">
+                    <i class="fas fa-cog"></i>
+                    <span>Settings</span>
+                </button>
+            </nav>
+            
+            <div class="sidebar-footer">
+                <button class="theme-toggle" id="theme-toggle" aria-label="Toggle theme">
+                    <i class="fas fa-moon"></i>
+                    <span>Dark Mode</span>
                 </button>
             </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="chat-container">
+            <header class="chat-header">
+                <div class="header-left">
+                    <button class="btn-icon" id="sidebar-open" aria-label="Open sidebar">
+                        <i class="fas fa-bars"></i>
+                    </button>
+                    <h1 id="current-task-name">English Practice</h1>
+                </div>
+                
+                <div class="header-stats">
+                    <div class="stat-item streak-stat" title="Daily Streak">
+                        <i class="fas fa-fire"></i>
+                        <span id="streak-count">0</span>
+                    </div>
+                    <div class="stat-item xp-stat" title="Total Experience Points">
+                        <div class="xp-bar-container">
+                            <div class="xp-bar-fill" id="xp-bar-fill" style="width: 0%"></div>
+                        </div>
+                        <span id="xp-count">0 XP</span>
+                    </div>
+                </div>
+            </header>
+
+            <section class="messages-viewport" id="chat-area" aria-live="polite">
+                <!-- Welcome/Empty State -->
+                <div class="empty-state" id="empty-state">
+                    <img src="logo.svg" alt="" class="empty-state-logo">
+                    <h2>How can I help you learn today?</h2>
+                    <p>Select a task or just start typing to practice your English.</p>
+                </div>
+                <!-- Messages will be injected here -->
+            </section>
+
+            <!-- Input Area -->
+            <footer class="input-container">
+                <div class="input-wrapper">
+                    <button class="btn-icon record-btn" id="record-btn" title="Record Voice">
+                        <i class="fas fa-microphone"></i>
+                    </button>
+                    <textarea 
+                        id="message-input" 
+                        placeholder="Type your message..." 
+                        rows="1" 
+                        autocomplete="off"
+                    ></textarea>
+                    <button class="btn-send" id="send-btn" aria-label="Send message">
+                        <i class="fas fa-arrow-up"></i>
+                    </button>
+                </div>
+                <p class="input-hint">Press Enter to send, Shift + Enter for new line.</p>
+            </footer>
         </main>
+
+        <!-- Overlays (Hidden by default) -->
+        <div class="overlay hidden" id="overlay">
+            <div class="overlay-content">
+                <button class="btn-icon close-overlay" id="close-overlay">
+                    <i class="fas fa-times"></i>
+                </button>
+                <div id="overlay-body">
+                    <!-- Dynamic content: Progress charts or Settings -->
+                </div>
+            </div>
+        </div>
     </div>
 
     <script src="script.js"></script>

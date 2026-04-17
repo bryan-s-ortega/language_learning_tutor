@@ -11,6 +11,7 @@ from handle_telegram_interaction.utils import (
     update_user_proficiency,
     get_user_proficiency,
     generate_progress_report,
+    generate_tutor_chat_response,
 )
 
 # Initialize secrets
@@ -103,9 +104,7 @@ Ready to start learning? Click 'New Task' to begin!
         interaction_state = current_state.get("interaction_state", "idle")
 
         if interaction_state != "awaiting_answer":
-            return {
-                "message": "I'm not currently waiting for an answer. Please start a new task."
-            }
+            return self.handle_free_conversation(user_id, text_answer, voice_bytes)
 
         task_details = current_state.get("current_task_details")
         if not task_details:
@@ -227,6 +226,34 @@ Ready to start learning? Click 'New Task' to begin!
 
             update_firestore_state({field_name: recent_items}, user_doc_id=user_id)
 
+    def handle_free_conversation(
+        self, user_id: str, text: Optional[str] = None, voice: Optional[bytes] = None
+    ) -> Dict[str, Any]:
+        """Handle non-task messages as a natural tutoring conversation."""
+        current_state = get_firestore_state(user_doc_id=user_id)
+        sensitivity = current_state.get("correction_sensitivity", "standard")
+
+        response_data = generate_tutor_chat_response(
+            self.gemini_key,
+            user_id,
+            text_query=text,
+            voice_query=voice,
+            sensitivity=sensitivity,
+        )
+
+        # Update gamification (smaller XP for chat than tasks)
+        xp_gain = 5  # Base XP for chatting
+        if response_data.get("is_mostly_correct"):
+            xp_gain += 10
+
+        gamification_update = self._update_gamification(user_id, xp_gain=xp_gain)
+
+        return {
+            "message": response_data.get("chat_response"),
+            "tutor_notes": response_data.get("tutor_notes"),
+            "gamification": gamification_update,
+        }
+
     def set_difficulty(self, user_id: str, level: str) -> bool:
         if level.lower() in ["beginner", "intermediate", "advanced"]:
             update_firestore_state(
@@ -235,7 +262,58 @@ Ready to start learning? Click 'New Task' to begin!
             return True
         return False
 
+    def set_config(self, user_id: str, config_data: Dict[str, Any]) -> bool:
+        """Update multiple configuration settings at once."""
+        allowed_keys = [
+            "difficulty_level",
+            "response_language",
+            "correction_sensitivity",
+        ]
+        updates = {}
+        for key, value in config_data.items():
+            if key in allowed_keys:
+                updates[key] = value
+
+        if updates:
+            return update_firestore_state(updates, user_doc_id=user_id)
+        return False
+
     def set_language(self, user_id: str, language: str) -> bool:
         # Simple validation, can be expanded
         update_firestore_state({"response_language": language}, user_doc_id=user_id)
         return True
+
+    def _update_gamification(self, user_id: str, xp_gain: int = 0):
+        """Update streaks and add XP."""
+        current_state = get_firestore_state(user_doc_id=user_id)
+
+        # 1. Update XP
+        total_xp = current_state.get("total_xp", 0) + xp_gain
+
+        # 2. Update Streak
+        streak = current_state.get("current_streak", 0)
+        last_date_str = current_state.get("last_practice_date")
+
+        # We use simple UTC date for logic, but in a real app we'd use user's local date
+        # For now, let's stick to a robust day-tracking
+        today_date = datetime.utcnow().date()
+
+        if last_date_str:
+            last_date = datetime.strptime(last_date_str, "%Y-%m-%d").date()
+            days_diff = (today_date - last_date).days
+
+            if days_diff == 1:
+                streak += 1
+            elif days_diff > 1:
+                streak = 1
+            # if days_diff == 0, streak remains the same
+        else:
+            streak = 1
+
+        update_data = {
+            "total_xp": total_xp,
+            "current_streak": streak,
+            "last_practice_date": today_date.strftime("%Y-%m-%d"),
+        }
+        update_firestore_state(update_data, user_doc_id=user_id)
+        return update_data

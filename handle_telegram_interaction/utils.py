@@ -3,6 +3,7 @@ import random
 import requests
 import logging
 import datetime
+import os
 from typing import Optional, Dict, Any, List
 from .config import config
 import re
@@ -80,6 +81,21 @@ def access_secret_version(secret_id: str, version_id: str = "latest") -> str:
     cache_key = f"{secret_id}:{version_id}"
     if cache_key in _secret_cache:
         return _secret_cache[cache_key]
+
+    # Fallback to environment variables for local development
+    env_map = {
+        config.secrets.gemini_api_key_secret_id: "GEMINI_API_KEY",
+        config.secrets.telegram_token_secret_id: "TELEGRAM_BOT_TOKEN",
+        config.secrets.authorized_users_secret_id: "AUTHORIZED_USERS",
+        config.secrets.admin_users_secret_id: "ADMIN_USERS",
+    }
+    env_var = env_map.get(secret_id)
+    if env_var and os.getenv(env_var):
+        secret_value = os.getenv(env_var)
+        _secret_cache[cache_key] = secret_value
+        logger.info(f"Using environment variable fallback for secret: {secret_id}")
+        return secret_value
+
     if not config.database.project_id:
         error_msg = (
             "GCP_PROJECT environment variable not set or PROJECT_ID constant is empty."
@@ -96,6 +112,7 @@ def access_secret_version(secret_id: str, version_id: str = "latest") -> str:
     except Exception as e:
         error_msg = f"Error accessing secret {secret_id}: {e}"
         logger.error(error_msg, exc_info=True)
+        # If we failed and didn't find an env var, we raise
         raise SecretAccessError(error_msg) from e
 
 
@@ -1250,6 +1267,92 @@ def youtube_search(query, api_key, max_results=1):
         video_id = items[0]["id"]["videoId"]
         return f"https://www.youtube.com/watch?v={video_id}"
     return None
+
+
+def generate_tutor_chat_response(
+    api_key: str,
+    user_id: str,
+    text_query: Optional[str] = None,
+    voice_query: Optional[bytes] = None,
+    sensitivity: str = "standard",
+) -> Dict[str, Any]:
+    """Generates a natural chat response with separate tutor feedback notes."""
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel(config.ai.gemini_model_name)
+
+    # Sensitivity description mapping
+    sensitivity_prompts = {
+        "casual": "Only correct major errors that hinder understanding. Be very relaxed.",
+        "standard": "Correct noticeable grammatical errors and awkward phrasing naturally.",
+        "strict": "Correct every minor detail, including subtle nuances, prepositions, and articles.",
+        "professional": "Focus on formal tone, sophisticated vocabulary, and business-appropriate phrasing.",
+    }
+    sensitivity_instr = sensitivity_prompts.get(
+        sensitivity.lower(), sensitivity_prompts["standard"]
+    )
+
+    proficiency_data = get_user_proficiency(user_id)
+    srs_context = ""
+    # Simple SRS check: items with mastery < 0.6
+    due_items = []
+    if proficiency_data:
+        for cat, items in proficiency_data.items():
+            for name, stats in items.items():
+                if stats.get("mastery_level", 0) < 0.6:
+                    due_items.append(name)
+        if due_items:
+            srs_context = f"\nNote: The user recently struggled with these terms: {', '.join(due_items[:3])}. If natural, try to use one of them in your response or encourage their use."
+
+    system_prompt = (
+        "You are an elite AI English Tutor. You have two goals for every user interaction:\n"
+        "1. Be a friendly, engaging conversation partner. Keep the user talking.\n"
+        f"2. Be a linguistic expert. {sensitivity_instr}\n\n"
+        "RESPONSE FORMAT:\n"
+        "You MUST return your response as a valid JSON object with these fields:\n"
+        "- 'chat_response': Your natural, friendly reply to the user (Markdown supported).\n"
+        "- 'tutor_notes': A separate list of corrections, grammar tips, or 'Level-up' suggestions (Markdown supported). "
+        "Each note should ideally explain *why* something was corrected or suggest a more advanced way to say it. "
+        "If no corrections are needed, this should be an empty list [].\n"
+        "- 'is_mostly_correct': Boolean. True if the user's input had 0-1 minor errors.\n\n"
+        "USER CONTEXT:"
+        f"{srs_context}\n"
+        "Important: Return ONLY the JSON object."
+    )
+
+    prompt_parts = [system_prompt]
+    if text_query:
+        prompt_parts.append(f"USER MESSAGE: {text_query}")
+    if voice_query:
+        prompt_parts.append(
+            "USER VOICE MESSAGE (analyze the transcribed intent and pronunciation):"
+        )
+        # Note: audio analysis requires specific config depending on gemini version used
+        prompt_parts.append({"mime_type": "audio/ogg", "data": voice_query})
+
+    try:
+        response = model.generate_content(prompt_parts)
+        text_response = response.text.strip()
+
+        # Strip potential markdown code blocks
+        if text_response.startswith("```json"):
+            text_response = text_response[7:-3].strip()
+        elif text_response.startswith("```"):
+            text_response = text_response[3:-3].strip()
+
+        data = json.loads(text_response)
+
+        # Ensure list type for tutor_notes
+        if isinstance(data.get("tutor_notes"), str):
+            data["tutor_notes"] = [data["tutor_notes"]]
+
+        return data
+    except Exception as e:
+        logger.error(f"Error in generate_tutor_chat_response: {e}")
+        return {
+            "chat_response": "I'm sorry, I had a bit of a glitch. Could you say that again?",
+            "tutor_notes": [],
+            "is_mostly_correct": True,  # Default to true to not penalize during glitches
+        }
 
 
 def get_system_statistics() -> dict:
