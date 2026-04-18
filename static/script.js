@@ -57,24 +57,13 @@ const elements = {
 let firebaseAuth = null;
 let isSigningUp = false;
 
-// Mock configuration - User will need to replace this with actual Firebase Config
-const firebaseConfig = {
-    apiKey: "YOUR_API_KEY",
-    authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-    projectId: "YOUR_PROJECT_ID",
-    storageBucket: "YOUR_PROJECT_ID.appspot.com",
-    messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-    appId: "YOUR_APP_ID"
-};
-
 // --- Secure Fetch Wrapper ---
 async function secureFetch(url, options = {}) {
-    const user = firebaseAuth.currentUser;
-    if (!user) {
+    if (!firebaseAuth || !firebaseAuth.currentUser) {
         throw new Error("User not authenticated");
     }
 
-    const token = await user.getIdToken();
+    const token = await firebaseAuth.currentUser.getIdToken();
     const headers = {
         ...options.headers,
         'Authorization': `Bearer ${token}`
@@ -87,25 +76,34 @@ async function secureFetch(url, options = {}) {
 document.addEventListener('DOMContentLoaded', async () => {
     applyTheme(state.theme);
     setupEventListeners();
-    initAuth();
+    await initAuth(); // Wait for auth to initialize
 });
 
-function initAuth() {
+async function initAuth() {
     const { initializeApp, getAuth } = window.firebaseDependencies;
-    const { 
-        onAuthStateChanged, 
-        GoogleAuthProvider, 
-        signInWithPopup, 
-        signInWithEmailAndPassword, 
-        createUserWithEmailAndPassword 
-    } = window.importFirebaseFunctions || {}; // Fallback if modules not exposed
-
-    // Note: In a real production app, we'd use a bundler. 
-    // Here we're using CDNs as defined in index.html.
-    // We'll dynamic import to ensure availability since we're using <script type="module">
     
-    import("https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js").then((authModule) => {
-        const app = initializeApp(firebaseConfig);
+    try {
+        // Fetch the config from our backend
+        const configResp = await fetch(`${API_URL}/firebase-config`);
+        const firebaseConfig = await configResp.json();
+
+        // Basic check if config is populated
+        if (!firebaseConfig.api_key) {
+            console.error("Firebase configuration is missing on the server.");
+            alert("Application Error: Firebase is not configured. Please check your .env file on the server.");
+            return;
+        }
+
+        const authModule = await import("https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js");
+        const app = initializeApp({
+            apiKey: firebaseConfig.api_key,
+            authDomain: firebaseConfig.auth_domain,
+            projectId: firebaseConfig.project_id,
+            storageBucket: firebaseConfig.storage_bucket,
+            messagingSenderId: firebaseConfig.messaging_sender_id,
+            appId: firebaseConfig.app_id
+        });
+        
         firebaseAuth = getAuth(app);
 
         authModule.onAuthStateChanged(firebaseAuth, (user) => {
@@ -150,7 +148,10 @@ function initAuth() {
             elements.authToggle.textContent = isSigningUp ? "Already have an account? Sign In" : "Don't have an account? Create one";
         };
 
-    });
+    } catch (error) {
+        console.error("Failed to initialize Firebase:", error);
+        alert("Initialization Error: Could not connect to authentication services.");
+    }
 }
 
 function initApp() {

@@ -6,6 +6,10 @@ Centralizes all configuration settings, constants, and environment-specific valu
 import os
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 
 @dataclass
@@ -17,6 +21,16 @@ class DatabaseConfig:
 
 
 @dataclass
+class FirebaseConfig:
+    api_key: Optional[str] = None
+    auth_domain: Optional[str] = None
+    project_id: Optional[str] = None
+    storage_bucket: Optional[str] = None
+    messaging_sender_id: Optional[str] = None
+    app_id: Optional[str] = None
+
+
+@dataclass
 class SecretConfig:
     gemini_api_key_secret_id: str = "gemini-api"
     authorized_users_secret_id: str = "authorized-users"
@@ -25,7 +39,7 @@ class SecretConfig:
 
 @dataclass
 class AIConfig:
-    gemini_model_name: str = "gemini-2.0-flash-001"
+    gemini_model_name: str = "gemini-2.5-flash"
     max_tokens: int = 1000
     temperature: float = 0.7
 
@@ -63,6 +77,7 @@ class Config:
         self.ai = AIConfig()
         self.tasks = TaskConfig()
         self.logging = LoggingConfig()
+        self.firebase = FirebaseConfig()
         self._load_environment_overrides()
 
     def _load_environment_overrides(self):
@@ -82,6 +97,14 @@ class Config:
         override("ai.temperature", "GEMINI_TEMPERATURE", float)
         override("logging.level", "LOG_LEVEL", str.upper)
 
+        # Firebase overrides
+        override("firebase.api_key", "FIREBASE_API_KEY")
+        override("firebase.auth_domain", "FIREBASE_AUTH_DOMAIN")
+        override("firebase.project_id", "FIREBASE_PROJECT_ID")
+        override("firebase.storage_bucket", "FIREBASE_STORAGE_BUCKET")
+        override("firebase.messaging_sender_id", "FIREBASE_MESSAGING_SENDER_ID")
+        override("firebase.app_id", "FIREBASE_APP_ID")
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "database": self.database.__dict__,
@@ -89,7 +112,35 @@ class Config:
             "ai": self.ai.__dict__,
             "tasks": {"task_types": self.tasks.task_types},
             "logging": self.logging.__dict__,
+            "firebase": self.get_firebase_config(),
         }
+
+    def get_firebase_config(self) -> Dict[str, Any]:
+        """Fetch Firebase config from environment or fallback to Secret Manager."""
+        from .utils import access_secret_version
+
+        # Mapping of config fields to environmental variables and Secret Manager IDs
+        fields = {
+            "api_key": "FIREBASE_API_KEY",
+            "auth_domain": "FIREBASE_AUTH_DOMAIN",
+            "project_id": "FIREBASE_PROJECT_ID",
+            "storage_bucket": "FIREBASE_STORAGE_BUCKET",
+            "messaging_sender_id": "FIREBASE_MESSAGING_SENDER_ID",
+            "app_id": "FIREBASE_APP_ID",
+        }
+
+        result = {}
+        for field, secret_id in fields.items():
+            # Already set in config via _load_environment_overrides if .env existed
+            val = getattr(self.firebase, field)
+            if not val:
+                try:
+                    # Try to fetch from Secret Manager using the same ID
+                    val = access_secret_version(secret_id)
+                except Exception:
+                    val = None
+            result[field] = val
+        return result
 
 
 config = Config()

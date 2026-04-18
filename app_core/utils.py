@@ -15,7 +15,23 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# --- Lazy Google Cloud Client Initialization ---
+# --- AI Helpers ---
+def init_gemini():
+    """Initialize the Gemini AI service."""
+    try:
+        # Force refresh the key on startup to avoid caching old keys
+        gemini_key = access_secret_version(
+            config.secrets.gemini_api_key_secret_id, force_refresh=True
+        )
+        # Force the library to use rest transport
+        genai.configure(api_key=gemini_key, transport="rest")
+        logger.info(
+            "Gemini AI successfully configured at startup (Library Upgraded + REST + Cache Cleared)."
+        )
+    except Exception as e:
+        logger.error(f"Failed to configure Gemini AI: {e}")
+
+
 def get_secret_client():
     if not hasattr(get_secret_client, "_client"):
         from google.cloud import secretmanager
@@ -73,10 +89,27 @@ class GeminiAPIError(LanguageLearningError):
 _secret_cache = {}
 
 
-def access_secret_version(secret_id: str, version_id: str = "latest") -> str:
+def access_secret_version(
+    secret_id: str, version_id: str = "latest", force_refresh: bool = False
+) -> str:
     cache_key = f"{secret_id}:{version_id}"
-    if cache_key in _secret_cache:
+    if not force_refresh and cache_key in _secret_cache:
         return _secret_cache[cache_key]
+
+    # Try Secret Manager first (Standard Production path)
+    if config.database.project_id:
+        name = f"projects/{config.database.project_id}/secrets/{secret_id}/versions/{version_id}"
+        try:
+            response = get_secret_client().access_secret_version(request={"name": name})
+            secret_value = response.payload.data.decode("UTF-8")
+            _secret_cache[cache_key] = secret_value
+            logger.debug(f"Successfully accessed secret from Manager: {secret_id}")
+            return secret_value
+        except Exception as e:
+            # Only logistical errors or real 404s should fall through to env fallback
+            logger.debug(
+                f"Secret Manager fetch failed for {secret_id}, trying env fallback: {e}"
+            )
 
     # Fallback to environment variables for local development
     env_map = {
@@ -88,27 +121,19 @@ def access_secret_version(secret_id: str, version_id: str = "latest") -> str:
     if env_var and os.getenv(env_var):
         secret_value = os.getenv(env_var)
         _secret_cache[cache_key] = secret_value
-        logger.info(f"Using environment variable fallback for secret: {secret_id}")
+        logger.info(
+            f"Using environment variable fallback for secret: {secret_id} (Key starting with: {secret_value[:5]})"
+        )
         return secret_value
 
-    if not config.database.project_id:
-        error_msg = (
-            "GCP_PROJECT environment variable not set or PROJECT_ID constant is empty."
-        )
-        logger.critical(error_msg)
-        raise SecretAccessError(error_msg)
-    name = f"projects/{config.database.project_id}/secrets/{secret_id}/versions/{version_id}"
-    try:
-        response = get_secret_client().access_secret_version(request={"name": name})
-        secret_value = response.payload.data.decode("UTF-8")
-        _secret_cache[cache_key] = secret_value
-        logger.debug(f"Successfully accessed secret: {secret_id}")
-        return secret_value
-    except Exception as e:
-        error_msg = f"Error accessing secret {secret_id}: {e}"
-        logger.error(error_msg, exc_info=True)
-        # If we failed and didn't find an env var, we raise
-        raise SecretAccessError(error_msg) from e
+    logger.warning(
+        f"Could not find secret {secret_id} in Manager or Env vars. Application may have limited functionality."
+    )
+    return ""  # Return empty string instead of crashing
+
+
+# Initialize Gemini AI service once helper is available
+init_gemini()
 
 
 # --- User Management Helpers ---
@@ -488,7 +513,6 @@ def generate_task(gemini_key, task_type, user_doc_id, topic=None):
         logger.info(
             f"Generating free style voice task instruction with prompt: {prompt}"
         )
-        genai.configure(api_key=gemini_key)
         model = genai.GenerativeModel(config.ai.gemini_model_name)
         instruction_response = model.generate_content(prompt)
         if instruction_response.text:
@@ -522,7 +546,6 @@ def generate_task(gemini_key, task_type, user_doc_id, topic=None):
             + language_instruction
         )
         logger.info(f"Generating topic voice task instruction with prompt: {prompt}")
-        genai.configure(api_key=gemini_key)
         model = genai.GenerativeModel(config.ai.gemini_model_name)
         instruction_response = model.generate_content(prompt)
         if instruction_response.text:
@@ -567,7 +590,6 @@ def generate_task(gemini_key, task_type, user_doc_id, topic=None):
     max_retries = 2
     for attempt in range(max_retries + 1):
         try:
-            genai.configure(api_key=gemini_key)
             model = genai.GenerativeModel(config.ai.gemini_model_name)
             response = model.generate_content(prompt)
             if response.text:
@@ -653,7 +675,6 @@ def evaluate_answer(
     task_description = task_details.get("description", "Task not specified")
     task_type = task_details.get("type", "Unknown")
 
-    genai.configure(api_key=gemini_key)
     model = genai.GenerativeModel(config.ai.gemini_model_name)
 
     # Get user's learning history for personalized feedback
@@ -1079,7 +1100,6 @@ def transcribe_voice(audio_content, gemini_key=None):
 
         # Use Gemini multi-modal for audio transcription
         if gemini_key:
-            genai.configure(api_key=gemini_key)
             model = genai.GenerativeModel(config.ai.gemini_model_name)
 
             prompt = """
@@ -1169,8 +1189,6 @@ def generate_tutor_chat_response(
     sensitivity: str = "standard",
 ) -> Dict[str, Any]:
     """Generates a natural chat response with separate tutor feedback notes."""
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel(config.ai.gemini_model_name)
 
     # Sensitivity description mapping
     sensitivity_prompts = {
@@ -1222,8 +1240,37 @@ def generate_tutor_chat_response(
         prompt_parts.append({"mime_type": "audio/ogg", "data": voice_query})
 
     try:
-        response = model.generate_content(prompt_parts)
-        text_response = response.text.strip()
+        # Get the API key fresh from the helper
+        api_key = access_secret_version(config.secrets.gemini_api_key_secret_id)
+
+        # Use direct REST API call to v1 stable endpoint
+        model_name = config.ai.gemini_model_name
+        if not model_name.startswith("models/"):
+            model_name = f"models/{model_name}"
+
+        url = f"https://generativelanguage.googleapis.com/v1/{model_name}:generateContent?key={api_key}"
+
+        # Combine all prompt parts into a single text block for the 'user' role
+        # This is the most compatible format for the v1 REST API
+        full_text = "\n\n".join(
+            [p if isinstance(p, str) else str(p) for p in prompt_parts]
+        )
+        payload = {"contents": [{"role": "user", "parts": [{"text": full_text}]}]}
+
+        logger.info(f"Calling Gemini REST API: {url.replace(api_key, 'REDACTED')}")
+
+        # Simple REST implementation
+        resp = requests.post(url, json=payload, timeout=60)
+
+        if resp.status_code != 200:
+            logger.error(f"Gemini API Error {resp.status_code}: {resp.text}")
+            resp.raise_for_status()
+
+        result_data = resp.json()
+        logger.debug(f"Gemini Response received: {result_data}")
+        text_response = result_data["candidates"][0]["content"]["parts"][0][
+            "text"
+        ].strip()
 
         # Strip potential markdown code blocks
         if text_response.startswith("```json"):

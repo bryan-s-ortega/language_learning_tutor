@@ -23,6 +23,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.on_event("startup")
+async def startup_event():
+    from app_core.config import config
+
+    logger.info("--- APPLICATION STARTUP DIAGNOSTICS ---")
+    logger.info(f"Targeting GCP Project: {config.database.project_id}")
+    logger.info(f"Using Firestore Collection: {config.database.firestore_collection}")
+    logger.info("Firebase initialization: Ready")
+    logger.info("---------------------------------------")
+
+
 # Initialize Tutor Service
 tutor_service = TutorService()
 
@@ -143,6 +155,14 @@ async def get_proficiency(uid: str = Depends(get_current_user)):
     except Exception as e:
         logger.error(f"Error in get_proficiency: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/firebase-config")
+async def get_firebase_config_endpoint():
+    """Retrieve the Firebase configuration for the frontend."""
+    from app_core.config import config
+
+    return config.get_firebase_config()
 
 
 # Mount static files (Frontend)
